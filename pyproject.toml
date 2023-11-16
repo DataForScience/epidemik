@@ -1,0 +1,22 @@
+[project]
+name = "epi"
+version = "0.1.0"
+authors = [
+  { name="Bruno Gonçalves", email="bgoncalves@data4sci.com" },
+]
+description = "A package to simulate epidemic models"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/DataForScience/epi"
+"Bug Tracker" = "https://github.com/DataForScience/epi/issues"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
