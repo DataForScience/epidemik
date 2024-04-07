@@ -2,7 +2,7 @@
 
 Compartmental Epidemic Models in Python
 
-## Installation
+## Installation[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#project-status)
 
 Use the package manager [pip](https://pip.pypa.io/en/stable/) to install epidemik.
 
@@ -10,7 +10,7 @@ Use the package manager [pip](https://pip.pypa.io/en/stable/) to install epidemi
 pip install epidemik
 ```
 
-## Usage
+## Usage[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#project-status)
 
 `epidemik` provides three main modules, `EpiModel`, `NetworkEpiModel` and `MetaEpiModel`, usually imported directly from the `epidemik` package using
 
@@ -63,13 +63,13 @@ SIR.plot()
 <img src="https://raw.githubusercontent.com/DataForScience/epidemik/main/images/SIR_results.png" />
 
 
-## Contributing
+## Contributing[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#project-status)
 
 Pull requests are welcome. For major changes, please open an issue first
 to discuss what you would like to change.
 
 Please make sure to update tests as appropriate.
 
-## License
+## License[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#project-status)
 
 [MIT](https://choosealicense.com/licenses/mit/)
