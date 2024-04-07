@@ -13,9 +13,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import string
 
-from tqdm import tqdm
-tqdm.pandas()
-
 class EpiModel(object):
     """Simple Epidemic Model Implementation
     
@@ -562,69 +559,14 @@ class EpiModel(object):
             return None
 
     def __getitem__(self, key):
-        if key in self.values_.columns:
+        if type(key) != type([]):
+            key_check = set([key])
+        else:
+            key_check = set(key)
+
+        if len(key_check & set(self.values_.columns)) > 0:
             return self.values_[key]
-        elif key in self.values_ages_.columns:
+        elif len(key_check & set(self.values_ages_.columns)) > 0:
             return self.values_ages_[key]
         else:
             return None
-
-if __name__ == '__main__':
-    SIR = EpiModel()
-
-    beta = 0.3
-    mu = 0.1
-
-    SIR.add_interaction('S', 'I', 'I', rate=beta)
-    SIR.add_spontaneous('I', 'R', rate=mu)
-
-    SIR.single_step(S=10000, I=10, R=0)
-
-    for i in range(10):
-        temp = dict(SIR.values_.iloc[-1].to_dict())
-        SIR.single_step(**temp)
-
-    SIR.values_
-
-    exit()
-    Nk_uk = pd.read_csv("data/United Kingdom-2020.csv", index_col=0)
-    Nk_ke = pd.read_csv("data/Kenya-2020.csv", index_col=0)
-
-    contacts_uk = pd.read_excel("data/MUestimates_all_locations_2.xlsx", sheet_name="United Kingdom of Great Britain", header=None)
-    contacts_ke = pd.read_excel("data/MUestimates_all_locations_1.xlsx", sheet_name="Kenya")
-
-    beta = 0.05
-    mu = 0.1
-
-    SIR_uk = EpiModel()
-    SIR_uk.add_interaction('S', 'I', 'I', beta)
-    SIR_uk.add_spontaneous('I', 'R', mu)
-
-
-    SIR_ke = EpiModel()
-    SIR_ke.add_interaction('S', 'I', 'I', beta)
-    SIR_ke.add_spontaneous('I', 'R', mu)
-
-    N_uk = int(Nk_uk.sum())
-    N_ke = int(Nk_ke.sum())
-
-
-    SIR_uk.add_age_structure(contacts_uk, Nk_uk)
-    SIR_ke.add_age_structure(contacts_ke, Nk_ke)
-
-    SIR_uk.integrate(100, S=N_uk*.99, I=N_uk*.01, R=0)
-    SIR_ke.integrate(100, S=N_ke*.99, I=N_ke*.01, R=0)
-
-    fig, ax = plt.subplots(1)
-    SIR_uk.draw_model(ax)
-    fig.savefig('SIR_model.png', dpi=300, facecolor='white')
-
-    fig, ax = plt.subplots(1)
-
-    (SIR_uk['I']*100/N_uk).plot(ax=ax)
-    (SIR_ke['I']*100/N_ke).plot(ax=ax)
-    ax.legend(['UK', 'Kenya'])
-    ax.set_xlabel('Time')
-    ax.set_ylabel('Population (%)')
-
-    fig.savefig('SIR_age.png', dpi=300, facecolor='white')

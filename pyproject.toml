@@ -1,10 +1,10 @@
 [project]
-name = "epi"
-version = "0.1.0"
+name = "epidemik"
+version = "0.0.11"
 authors = [
   { name="Bruno Gonçalves", email="bgoncalves@data4sci.com" },
 ]
-description = "A package to simulate epidemic models"
+description = "A pakage to simulate compartmental epidemic models"
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
@@ -14,9 +14,9 @@ classifiers = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/DataForScience/epi"
-"Bug Tracker" = "https://github.com/DataForScience/epi/issues"
+Homepage = "https://github.com/DataForScience/epidemik"
+Issues = "https://github.com/DataForScience/epidemik/issues"
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0","matplotlib>=3.8","networkx>=3","numpy>=1.20","pandas>=2.0","scipy>=1.10"]
 build-backend = "setuptools.build_meta"
