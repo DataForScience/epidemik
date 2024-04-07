@@ -2,7 +2,19 @@
 
 Compartmental Epidemic Models in Python
 
-## Installation[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#project-status)
+
+---
+
+## Table of contents[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#toc)
+- [Installation](#installation)
+- [Tech Stack](#tech)
+- [Usage](#usage)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Installation[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#installation)
 
 Use the package manager [pip](https://pip.pypa.io/en/stable/) to install epidemik.
 
@@ -10,7 +22,27 @@ Use the package manager [pip](https://pip.pypa.io/en/stable/) to install epidemi
 pip install epidemik
 ```
 
-## Usage[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#project-status)
+<div align="right">[ <a href="#table-of-contents">↑ Back to top ↑</a> ]</div>
+
+---
+
+## Tech Stack[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#tech)
+
+
+Here's a brief high-level overview of the tech stack the `epidemik` package uses:
+
+- The model is implemented as a directed multigraph using [networkx](https://networkx.org/)
+- Ordinary Differential Equations are numerically integrated using [scipy](https://scipy.org/)
+- 
+
+
+
+<div align="right">[ <a href="#table-of-contents">↑ Back to top ↑</a> ]</div>
+
+---
+
+
+## Usage[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#usage)
 
 `epidemik` provides three main modules, `EpiModel`, `NetworkEpiModel` and `MetaEpiModel`, usually imported directly from the `epidemik` package using
 
@@ -62,14 +94,42 @@ SIR.plot()
 
 <img src="https://raw.githubusercontent.com/DataForScience/epidemik/main/images/SIR_results.png" />
 
+<div align="right">[ <a href="#table-of-contents">↑ Back to top ↑</a> ]</div>
 
-## Contributing[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#project-status)
+---
+
+## Contributing[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#contributing)
 
 Pull requests are welcome. For major changes, please open an issue first
 to discuss what you would like to change.
 
 Please make sure to update tests as appropriate.
 
-## License[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#project-status)
+Join our project and provide assistance by:
+* Checking out the list of [open issues](https://github.com/aregtech/areg-sdk/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) where we need help.
+* If you need new features, please open a [new issue](https://github.com/DataForScience/epidemik/issues) or start a [discussion](https://github.com/DataForScience/epidemik/discussions).
 
-[MIT](https://choosealicense.com/licenses/mit/)
+Please [![epidemik](https://img.shields.io/github/stars/DataForScience/epidemik.svg?style=social&label=Star%20epidemik)](https://github.com/DataForScience/epidemik/) repository to encourage contributors and helps to grow our community. Contact us for the feedback or new ideas.
+
+<div align="right">[ <a href="#table-of-contents">↑ Back to top ↑</a> ]</div>
+
+---
+
+<div align="right">[ <a href="#table-of-contents">↑ Back to top ↑</a> ]</div>
+
+---
+
+## License[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#license)
+
+`epidemik` is free and open-source software licensed under the [MIT License](https://choosealicense.com/licenses/mit/) [2024]  - Bruno Gonçalves. Please have a look at the [LICENSE.md](LICENSE) for more details.
+
+## Spread The Word[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#spread)
+
+If you want to say thank you and/or support active development of the `epidemik` package:
+
+- Add a GitHub Star to the project!
+- Tweet about the project on your Twitter!
+	- Tag [@data4sci](https://twitter.com/data4sci) and/or [@bgoncalves](https://twitter.com/bgoncalves)
+
+Thank you so much for your interest in growing the reach of the Well app!
+
