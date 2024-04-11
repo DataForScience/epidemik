@@ -1,0 +1,2 @@
+class NotInitialized(Exception):
+    pass

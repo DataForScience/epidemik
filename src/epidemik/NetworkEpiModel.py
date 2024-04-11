@@ -9,9 +9,9 @@ from numpy import linalg
 from numpy import random
 import pandas as pd
 import matplotlib.pyplot as plt
-from . import EpiModel
+from .EpiModel import EpiModel
 from collections import Counter
-
+from .utils import *
 
 class NetworkEpiModel(EpiModel):
     def __init__(self, network, compartments=None):

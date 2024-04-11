@@ -12,6 +12,7 @@ import scipy.integrate
 import pandas as pd
 import matplotlib.pyplot as plt
 import string
+from .utils import *
 
 class EpiModel(object):
     """Simple Epidemic Model Implementation
@@ -187,7 +188,7 @@ class EpiModel(object):
             
         return diff
     
-    def plot(self, title=None, normed=True, **kwargs):
+    def plot(self, title=None, normed=True, show=True, **kwargs):
         """
         Convenience function for plotting
         
@@ -216,9 +217,12 @@ class EpiModel(object):
             if title is not None:
                 ax.set_title(title)
             
+            if show:
+                plt.show()
+
             return ax
         except:
-            raise NotInitialized('You must call integrate() first')
+            raise NotInitialized('You must call integrate() or simulate() first')
     
     def __getattr__(self, name):
         """
@@ -457,12 +461,12 @@ class EpiModel(object):
 
         return inf
 
-    def draw_model(self, ax=None):
+    def draw_model(self, ax=None, show=True):
         try:
             from networkx.drawing.nx_agraph import graphviz_layout
             pos=graphviz_layout(self.transitions, prog='dot', args='-Grankdir="LR"')
         except:
-            pos=nx.layout.spectral_layout(G)
+            pos=nx.layout.spectral_layout(self.transitions)
 
         colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
 
@@ -510,6 +514,8 @@ class EpiModel(object):
         font_color='k', node_color=node_colors, node_size=1000, ax=ax)
         nx.draw_networkx_edge_labels(self.transitions, pos, edge_labels=edge_labels, ax=ax)
 
+        if show:
+            plt.show()
 
     def R0(self):
         infected = set()
