@@ -30,3 +30,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.dynamic]
 version = {attr = "epidemik.__version__"}
+
+[tool.pytest.ini_options]
+pythonpath = [
+  ".", "src",
+]

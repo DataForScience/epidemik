@@ -121,7 +121,7 @@ to discuss what you would like to change.
 Please make sure to update tests as appropriate.
 
 Join our project and provide assistance by:
-* Checking out the list of [open issues](https://github.com/aregtech/areg-sdk/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) where we need help.
+* Checking out the list of [open issues](https://github.com/DataForScience/epidemik/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) where we need help.
 * If you need new features, please open a [new issue](https://github.com/DataForScience/epidemik/issues) or start a [discussion](https://github.com/DataForScience/epidemik/discussions).
 
  Contact us for the feedback or new ideas.
