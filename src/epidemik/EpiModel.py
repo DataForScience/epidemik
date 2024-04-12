@@ -188,15 +188,19 @@ class EpiModel(object):
             
         return diff
     
-    def plot(self, title=None, normed=True, show=True, **kwargs):
+    def plot(self, title=None, normed=True, show=True, ax=None, **kwargs):
         """
         Convenience function for plotting
         
         Parameters:
         - title: string, optional
             Title of the plot
-        - normed: bool, optional
+        - normed: bool, default=True
             Whether to normalize the values or not
+        - ax: matplotlib Axes object, default=None
+            The Axes object to plot to. If None, a new figure is created.
+        - show: bool, default=True
+            Whether to call plt.show() or not
         - kwargs: keyword arguments
             Additional arguments to pass to the plot function
         
@@ -207,10 +211,16 @@ class EpiModel(object):
         try:
             if normed:
                 N = self.values_.iloc[0].sum()
-                ax = (self.values_/N).plot(**kwargs)
             else:
-                ax = self.values_.plot(**kwargs)
-                
+                N = 1
+
+            if ax is None:
+                ax = plt.gca()
+
+            for comp in self.values_.columns:
+                (self.values_[comp]/N).plot(c=epi_colors[comp[0]], **kwargs)
+
+            ax.legend(self.values_.columns)
             ax.set_xlabel('Time')
             ax.set_ylabel('Population')
             
@@ -221,7 +231,8 @@ class EpiModel(object):
                 plt.show()
 
             return ax
-        except:
+        except Exception as e:
+            print(e)
             raise NotInitialized('You must call integrate() or simulate() first')
     
     def __getattr__(self, name):
@@ -462,36 +473,24 @@ class EpiModel(object):
         return inf
 
     def draw_model(self, ax=None, show=True):
+        """
+        Plot the model structure
+
+        - ax: matplotlib Axes object, default=None
+            The Axes object to plot to. If None, a new figure is created.
+        - show: bool, default=True
+            Whether to call plt.show() or not
+        """
         try:
             from networkx.drawing.nx_agraph import graphviz_layout
             pos=graphviz_layout(self.transitions, prog='dot', args='-Grankdir="LR"')
         except:
             pos=nx.layout.spectral_layout(self.transitions)
 
-        colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-
-        S_color = colors[0]
-        E_color = colors[4]
-        I_color = colors[1]
-        R_color = colors[2]
-        D_color = colors[7]
-        default_color = colors[3]
-
         node_colors = []
 
         for node in self.transitions.nodes():
-            if node[0] == 'S':
-                node_colors.append(S_color)
-            elif node[0] == 'E':
-                node_colors.append(E_color)
-            elif node[0] == 'I':
-                node_colors.append(I_color)
-            elif node[0] == 'R':
-                node_colors.append(R_color)
-            elif node[0] == 'D':
-                node_colors.append(D_color)
-            else:
-                node_colors.append(default_color)
+            node_colors.append(epi_colors[node[0]])
 
         edge_labels = {}
 
@@ -508,7 +507,7 @@ class EpiModel(object):
 
 
         if ax is None:
-            fig, ax = plt.subplots(1)
+            fig, ax = plt.subplots(1, figsize=(10, 2))
 
         nx.draw(self.transitions, pos, with_labels=True, arrows=True, node_shape='H', 
         font_color='k', node_color=node_colors, node_size=1000, ax=ax)
@@ -518,6 +517,16 @@ class EpiModel(object):
             plt.show()
 
     def R0(self):
+        """
+        Return the value of the basic reproductive ratio, $R_0$, for the model as defined
+
+        The calculation is completely generic as it uses the Next-Generation matrix approach
+        defined in J. R. Soc Interface 7, 873 (2010)
+
+        Returns:
+        R0 - the value of the largest eigenvalue of the next generation matrix
+        """
+
         infected = set()
 
         susceptible = self._get_susceptible()
