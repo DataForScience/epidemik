@@ -22,7 +22,7 @@ class MetaEpiModel:
     
         Provides a way to implement and numerically integrate 
     """
-    def __init__(self, travel_graph, populations):
+    def __init__(self, travel_graph, populations, population='Population'):
         """
         Initialize the EpiModel object
         
@@ -35,6 +35,7 @@ class MetaEpiModel:
         """
         self.travel_graph = travel_graph
         self.populations = populations
+        self.population = population
 
         models = {}
 
@@ -122,6 +123,10 @@ class MetaEpiModel:
         for state in self.models:  
             self.models[state].add_vaccination(source, target, rate, start)
     
+    def R0(self):
+        key = list(self.models.keys())[0]
+        return self.models[key].R0()
+
     def get_state(self, state):
         """
         Return a reference to a state EpiModel object
@@ -133,14 +138,16 @@ class MetaEpiModel:
 
         return self.models[state]
 
-    def _initialize_populations(self, susceptible):
+    def _initialize_populations(self, susceptible, population=None):
         columns = list(self.transitions.nodes())
         self.compartments_ = pd.DataFrame(np.zeros((self.travel_graph.shape[0], len(columns)), dtype='int'), columns=columns)
         self.compartments_.index = self.populations.index
 
-        susceptible = list(self.prototype._get_susceptible())[0]
+        if population is None:
+            population = self.population
 
-        self.compartments_.loc[:, susceptible] = self.populations['Population']
+        for state in self.compartments_.index:
+            self.compartments_.loc[state, susceptible]  = self.populations.loc[state, population]
 
     def _run_travel(self, compartments_, travel):
         def travel_step(x, populations):
@@ -160,9 +167,9 @@ class MetaEpiModel:
             
         return new_compartments
     
-    def _run_spread(self, models, compartments_, seasonality):
+    def _run_spread(self):
         for state in self.compartments_.index:
-            pop = dict(self.compartments_.loc[state].to_dict())
+            pop = self.compartments_.loc[state].to_dict()
             self.models[state].single_step(**pop)
             self.compartments_.loc[state] = self.models[state].values_.iloc[[-1]].values[0]
 
@@ -180,9 +187,15 @@ class MetaEpiModel:
                 self.compartments_.loc[seed_state, susceptible] -= kwargs[comp]
 
         for t in tqdm(range(t_min, timestamp+1), total=timestamp):
-            self._run_spread(self.models, self.compartments_, self.seasonality)
+            self._run_spread()
             self.compartments_ = self._run_travel(self.compartments_, self.travel_graph)
     
+    def integrate(self, **kwargs):
+        raise NotImplementedError("MetaEpiModel doesn't support direct integration of the ODE")
+
+    def draw_model(self):
+        return self.models.iloc[0].draw_model()
+
     def plot(self, title=None, normed=True, layout=None, **kwargs):
         if layout is None:
             n_pop = self.travel_graph.shape[0]
@@ -289,47 +302,3 @@ class MetaEpiModel:
         ax.set_xticklabels(np.arange(0, peaks.shape[1], 3), fontsize=10)
         # ax.set_aspect(1)
         fig.patch.set_facecolor('#FFFFFF')
-    
-if __name__ == '__main__':
-
-    Nk_uk = pd.read_csv("data/United Kingdom-2020.csv", index_col=0)
-    Nk_ke = pd.read_csv("data/Kenya-2020.csv", index_col=0)
-
-    contacts_uk = pd.read_excel("data/MUestimates_all_locations_2.xlsx", sheet_name="United Kingdom of Great Britain", header=None)
-    contacts_ke = pd.read_excel("data/MUestimates_all_locations_1.xlsx", sheet_name="Kenya")
-
-    beta = 0.05
-    mu = 0.1
-
-    SIR_uk = EpiModel()
-    SIR_uk.add_interaction('S', 'I', 'I', beta)
-    SIR_uk.add_spontaneous('I', 'R', mu)
-
-
-    SIR_ke = EpiModel()
-    SIR_ke.add_interaction('S', 'I', 'I', beta)
-    SIR_ke.add_spontaneous('I', 'R', mu)
-
-    N_uk = int(Nk_uk.sum())
-    N_ke = int(Nk_ke.sum())
-
-
-    SIR_uk.add_age_structure(contacts_uk, Nk_uk)
-    SIR_ke.add_age_structure(contacts_ke, Nk_ke)
-
-    SIR_uk.integrate(100, S=N_uk*.99, I=N_uk*.01, R=0)
-    SIR_ke.integrate(100, S=N_ke*.99, I=N_ke*.01, R=0)
-
-    fig, ax = plt.subplots(1)
-    SIR_uk.draw_model(ax)
-    fig.savefig('SIR_model.png', dpi=300, facecolor='white')
-
-    fig, ax = plt.subplots(1)
-
-    (SIR_uk['I']*100/N_uk).plot(ax=ax)
-    (SIR_ke['I']*100/N_ke).plot(ax=ax)
-    ax.legend(['UK', 'Kenya'])
-    ax.set_xlabel('Time')
-    ax.set_ylabel('Population (%)')
-
-    fig.savefig('SIR_age.png', dpi=300, facecolor='white')
