@@ -4,7 +4,7 @@ dynamic = ["version"]
 authors = [
   { name="Bruno Gonçalves", email="bgoncalves@data4sci.com" },
 ]
-description = "A pakage to simulate compartmental epidemic models"
+description = "A package to simulate compartmental epidemic models"
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
@@ -23,6 +23,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/DataForScience/epidemik"
 Issues = "https://github.com/DataForScience/epidemik/issues"
+Documentation = "https://epidemik.readthedocs.io/"
 
 [build-system]
 requires = ["setuptools>=61.0"]
