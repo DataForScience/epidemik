@@ -5,8 +5,8 @@ from epidemik.utils import NotInitialized
 
 class MetaEpiModelTestCase(unittest.TestCase):
 	def setUp(self):
-		self.travel = pd.DataFrame({'A': [0.9, 0.1], 'B':[0.1, 0.9]}, index=["A", "B"])
-		self.population = pd.DataFrame({'Population':[100000, 10000]}, index=["A", "B"])
+		self.travel = pd.DataFrame({'A': [0.99, 0.1], 'B':[0.01, 0.9]}, index=["A", "B"])
+		self.population = pd.DataFrame({'Population':[100_000, 10_000]}, index=["A", "B"])
 
 		self.SIR = MetaEpiModel(self.travel, self.population)
 		self.beta = 0.3
