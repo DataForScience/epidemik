@@ -5,13 +5,22 @@
 
 Compartmental Epidemic Models in Python
 
+![GitHub Release](https://img.shields.io/github/v/release/DataForScience/epidemik)
+![GitHub followers](https://img.shields.io/github/followers/DataForScience)
+![GitHub forks](https://img.shields.io/github/forks/DataForScience/epidemik)
+![GitHub Repo stars](https://img.shields.io/github/stars/DataForScience/epidemik)
+![GitHub License](https://img.shields.io/github/license/DataForScience/epidemik)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/m/DataForScience/epidemik)
+![GitHub last commit](https://img.shields.io/github/last-commit/DataForScience/epidemik)
+
 
 ---
 
 ## Table of contents[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#toc)
 - [Installation](#installation)
 - [Tech Stack](#tech)
-- [Usage](#usage)
+- [Basic Usage](#usage)
+- [Documentation](#documentation)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -46,7 +55,7 @@ Here's a brief high-level overview of the tech stack the `epidemik` package uses
 ---
 
 
-## Usage[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#usage)
+## Basic Usage[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#usage)
 
 `epidemik` provides three main modules, `EpiModel`, `NetworkEpiModel` and `MetaEpiModel`, usually imported directly from the `epidemik` package using the module name
 
@@ -118,6 +127,15 @@ SIR.plot()
 which produces:
 
 <img src="https://raw.githubusercontent.com/DataForScience/epidemik/main/images/SIR_results.png" />
+
+<div align="right">[ <a href="#table-of-contents">↑ Back to top ↑</a> ]</div>
+
+---
+
+
+## Documentation[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#documentation)
+
+The full documentation for this project is available at ReadTheDocs in [html](https://epidemik.readthedocs.io/), [PDF](https://epidemik.readthedocs.io/_/downloads/en/latest/pdf/) and [ePub](https://epidemik.readthedocs.io/_/downloads/en/latest/epub/) formats.
 
 <div align="right">[ <a href="#table-of-contents">↑ Back to top ↑</a> ]</div>
 
