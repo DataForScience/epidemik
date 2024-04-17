@@ -22,7 +22,7 @@ class MetaEpiModel:
     
         Provides a way to implement and numerically integrate 
     """
-    def __init__(self, travel_graph, populations, population='Population'):
+    def __init__(self, travel_graph: pd.DataFrame, populations: pd.DataFrame, population: str ='Population'):
         """
         Initialize the EpiModel object
         
@@ -51,7 +51,7 @@ class MetaEpiModel:
 
         self.models = models
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """
         Return a string representation of the EpiModel object
         
@@ -65,7 +65,7 @@ class MetaEpiModel:
         text = "Metapopulation model with %u populations\n\nThe disease is defined by an %s" % (self.travel_graph.shape[0], model_text)
         return text 
 
-    def add_interaction(self, source, target, agent, rate):  
+    def add_interaction(self, source: str, target: str, agent: str, rate: float) -> None:  
         """
         Add an interaction between two compartments_
         
@@ -85,7 +85,7 @@ class MetaEpiModel:
         for state in self.models:  
             self.models[state].add_interaction(source, target, agent, rate)       
         
-    def add_spontaneous(self, source, target, rate):
+    def add_spontaneous(self, source: str, target: str, rate: float) -> None:
         """
         Add a spontaneous transition between two compartments_
         
@@ -103,7 +103,7 @@ class MetaEpiModel:
         for state in self.models:  
             self.models[state].add_spontaneous(source, target, rate)      
 
-    def add_vaccination(self, source, target, rate, start):
+    def add_vaccination(self, source: str, target: str, rate: float, start: int) -> None:
         """
         Add a vaccination transition between two compartments_
         
@@ -123,11 +123,11 @@ class MetaEpiModel:
         for state in self.models:  
             self.models[state].add_vaccination(source, target, rate, start)
     
-    def R0(self):
+    def R0(self) -> Union[float, None]:
         key = list(self.models.keys())[0]
         return self.models[key].R0()
 
-    def get_state(self, state):
+    def get_state(self, state: str) -> EpiModel:
         """
         Return a reference to a state EpiModel object
 
@@ -138,7 +138,7 @@ class MetaEpiModel:
 
         return self.models[state]
 
-    def _initialize_populations(self, susceptible, population=None):
+    def _initialize_populations(self, susceptible: str, population: Union[pd.DataFrame, None] =None) -> None:
         columns = list(self.transitions.nodes())
         self.compartments_ = pd.DataFrame(np.zeros((self.travel_graph.shape[0], len(columns)), dtype='int'), columns=columns)
         self.compartments_.index = self.populations.index
@@ -149,8 +149,8 @@ class MetaEpiModel:
         for state in self.compartments_.index:
             self.compartments_.loc[state, susceptible]  = self.populations.loc[state, population]
 
-    def _run_travel(self, compartments_, travel):
-        def travel_step(x, populations):
+    def _run_travel(self, compartments_: pd.DataFrame, travel: pd.DataFrame) -> pd.DataFrame:
+        def travel_step(x, populations: pd.DataFrame) -> pd.Series:
             n = populations.loc[x.name]
             p = travel.loc[x.name].values.tolist()
             output = np.random.multinomial(n, p)
@@ -163,17 +163,24 @@ class MetaEpiModel:
         # Travel occurs independently for each compartment
         # since we don't allow in-flight transitions
         for comp in compartments_.columns:
-            new_compartments[comp] = travel.apply(travel_step, populations=compartments_[comp]).sum(axis=1)
+            new_compartments[comp] = travel.apply(
+                    travel_step, 
+                    populations=compartments_[comp]
+            ).sum(axis=1)
             
         return new_compartments
     
-    def _run_spread(self):
+    def _run_spread(self) -> None:
         for state in self.compartments_.index:
             pop = self.compartments_.loc[state].to_dict()
             self.models[state].single_step(**pop)
             self.compartments_.loc[state] = self.models[state].values_.iloc[[-1]].values[0]
 
-    def simulate(self, timestamp, t_min=1, seasonality=None, seed_state=None, susceptible='S', **kwargs):
+    def simulate(
+            self, timestamp: int, t_min: int = 1, 
+            seasonality=None, seed_state: [str, None] = None, 
+            susceptible: str ='S', **kwargs
+    ) -> None:
         if seed_state is None:
             raise NotInitialized("You have to specify the seed_state")
 
@@ -193,10 +200,10 @@ class MetaEpiModel:
     def integrate(self, **kwargs):
         raise NotImplementedError("MetaEpiModel doesn't support direct integration of the ODE")
 
-    def draw_model(self):
+    def draw_model(self) -> None:
         return self.models.iloc[0].draw_model()
 
-    def plot(self, title=None, normed=True, layout=None, **kwargs):
+    def plot(self, title: Union[str, None] = None, normed: bool = True, layout=None, **kwargs) -> None:
         if layout is None:
             n_pop = self.travel_graph.shape[0]
             N = int(np.round(np.sqrt(n_pop), 0)+1)
@@ -270,7 +277,7 @@ class MetaEpiModel:
         fig.patch.set_facecolor('#FFFFFF')
         fig.tight_layout()
 
-    def plot_peaks(self):
+    def plot_peaks(self) -> None:
         peaks = None
 
         for state in self.models.values():
