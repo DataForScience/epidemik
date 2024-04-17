@@ -3,6 +3,7 @@
 # @author Bruno Goncalves
 ######################################################
 
+from typing import Union
 import networkx as nx
 import numpy as np
 from numpy import linalg
@@ -24,7 +25,7 @@ class NetworkEpiModel(EpiModel):
     def integrate(self, timesteps, **kwargs):
         raise NotImplementedError("Network Models don't support numerical integration")
 
-    def add_interaction(self, source, target, agent, rate, rescale=False):
+    def add_interaction(self, source: str, target: str, agent: str, rate: float, rescale: bool = False) -> None:
         if rescale:
             rate /= self.kavg_
 
@@ -38,7 +39,7 @@ class NetworkEpiModel(EpiModel):
 
         self.interactions[source][agent] = {'target': target, 'rate': rate}
         
-    def add_spontaneous(self, source, target, rate):
+    def add_spontaneous(self, source: str, target: str, rate: float) -> None:
         super(NetworkEpiModel, self).add_spontaneous(source, target, rate=rate)
         if source not in self.spontaneous:
             self.spontaneous[source] = {}
@@ -49,7 +50,7 @@ class NetworkEpiModel(EpiModel):
         self.spontaneous[source][target] = rate
 
 
-    def simulate(self, timesteps, seeds, **kwargs):
+    def simulate(self, timesteps: int, seeds, **kwargs) -> None:
         """Stochastically simulate the epidemic model"""
         pos = {comp: i for i, comp in enumerate(self.transitions.nodes())}
         N = self.network.number_of_nodes()
@@ -130,7 +131,7 @@ class NetworkEpiModel(EpiModel):
         self.population_ = pd.DataFrame(population)
         self.values_ = pd.DataFrame.from_records(self.population_.apply(lambda x: Counter(x), axis=1)).fillna(0).astype('int')
 
-    def R0(self):
+    def R0(self) -> Union[np.ndarray, None]:
         if 'R' not in set(self.transitions.nodes):
             return None
         return np.round(super(NetworkEpiModel, self).R0()*self.kavg_, 2)
