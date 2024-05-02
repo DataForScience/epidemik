@@ -6,12 +6,15 @@
 Compartmental Epidemic Models in Python
 
 ![GitHub Release](https://img.shields.io/github/v/release/DataForScience/epidemik)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/epidemik)
 ![GitHub followers](https://img.shields.io/github/followers/DataForScience)
 ![GitHub forks](https://img.shields.io/github/forks/DataForScience/epidemik)
 ![GitHub Repo stars](https://img.shields.io/github/stars/DataForScience/epidemik)
 ![GitHub License](https://img.shields.io/github/license/DataForScience/epidemik)
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/m/DataForScience/epidemik)
 ![GitHub last commit](https://img.shields.io/github/last-commit/DataForScience/epidemik)
+![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/DataForScience/epidemik)
+
 
 
 ---
