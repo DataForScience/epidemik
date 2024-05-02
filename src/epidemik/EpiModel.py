@@ -3,7 +3,10 @@
 # @author Bruno Goncalves
 ######################################################
 
+from typing import Dict, List, Set, Union
 import warnings
+import string
+
 import networkx as nx
 import numpy as np
 from numpy import linalg
@@ -11,7 +14,7 @@ from numpy import random
 import scipy.integrate
 import pandas as pd
 import matplotlib.pyplot as plt
-import string
+
 from .utils import *
 
 class EpiModel(object):
@@ -38,7 +41,7 @@ class EpiModel(object):
         if compartments is not None:
             self.transitions.add_nodes_from([comp for comp in compartments])
     
-    def add_interaction(self, source, target, agent, rate):  
+    def add_interaction(self, source: str, target: str, agent: str, rate: float) -> None:  
         """
         Add an interaction between two compartments
         
@@ -57,7 +60,7 @@ class EpiModel(object):
         """      
         self.transitions.add_edge(source, target, agent=agent, rate=rate)        
         
-    def add_spontaneous(self, source, target, rate):
+    def add_spontaneous(self, source: str, target: str, rate: float) -> None:
         """
         Add a spontaneous transition between two compartments
         
@@ -74,7 +77,7 @@ class EpiModel(object):
         """
         self.transitions.add_edge(source, target, rate=rate)
 
-    def add_vaccination(self, source, target, rate, start):
+    def add_vaccination(self, source: str, target: str, rate: float, start: int) -> None:
         """
         Add a vaccination transition between two compartments
         
@@ -93,7 +96,14 @@ class EpiModel(object):
         """
         self.transitions.add_edge(source, target, rate=rate, start=start)
 
-    def add_age_structure(self, matrix, population):
+    def add_age_structure(self, matrix: List, population: List) -> List[List]:
+        """ 
+        Add a vaccination transition between two compartments
+        
+        Parameters:
+        - matrix: List
+        - population: List
+        """
         self.contact = np.asarray(matrix)
         self.population = np.asarray(population).flatten()
 
@@ -131,7 +141,7 @@ class EpiModel(object):
 
         self.transitions = model.transitions
         
-    def _new_cases(self, population, time, pos):
+    def _new_cases(self, population: np.ndarray, time: float, pos: Dict) -> np.ndarray:
         """
         Internal function used by integration routine
         
@@ -188,7 +198,7 @@ class EpiModel(object):
             
         return diff
     
-    def plot(self, title=None, normed=True, show=True, ax=None, **kwargs):
+    def plot(self, title: Union[str, None]= None, normed: bool = True, show: bool = True, ax: Union[plt.Axes, None] = None, **kwargs):
         """
         Convenience function for plotting
         
@@ -235,7 +245,7 @@ class EpiModel(object):
             print(e)
             raise NotInitialized('You must call integrate() or simulate() first')
     
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> pd.Series:
         """
         Dynamic method to return the individual compartment values
         
@@ -252,7 +262,7 @@ class EpiModel(object):
         else:
             raise AttributeError("'EpiModel' object has no attribute '%s'" % name)
 
-    def simulate(self, timesteps, t_min=1, seasonality=None, **kwargs):
+    def simulate(self, timesteps: int, t_min: int = 1, seasonality: Union[np.ndarray, None] = None, **kwargs) -> None:
         """
         Stochastically simulate the epidemic model
         
@@ -334,7 +344,7 @@ class EpiModel(object):
         values = np.array(values)
         self.values_ = pd.DataFrame(values[1:], columns=comps, index=time)
     
-    def integrate(self, timesteps, t_min=1, seasonality=None, **kwargs):
+    def integrate(self, timesteps: int , t_min: int = 1, seasonality: Union[np.ndarray, None] = None, **kwargs) -> None:
         """
         Numerically integrate the epidemic model
         
@@ -375,7 +385,14 @@ class EpiModel(object):
         time = np.arange(t_min, t_min+timesteps, 1)
 
         self.seasonality = seasonality
-        values = pd.DataFrame(scipy.integrate.odeint(self._new_cases, population, time, args=(pos,)), columns=pos.keys(), index=time)
+        values = pd.DataFrame(
+                scipy.integrate.odeint(
+                    self._new_cases, 
+                    population, 
+                    time, 
+                    args=(pos,)
+                ), columns=pos.keys(), index=time
+        )
 
         if self.population is None:
             self.values_ = values
@@ -398,7 +415,7 @@ class EpiModel(object):
             new_values = pd.concat([old_values, self.values_.iloc[[-1]]])
             self.values_ = new_values
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """
         Return a string representation of the EpiModel object
         
@@ -433,7 +450,7 @@ class EpiModel(object):
 
         return text
 
-    def _get_active(self):
+    def _get_active(self) -> Set:
         active = set()
 
         for node_i, node_j, data in self.transitions.edges(data=True):
@@ -444,7 +461,7 @@ class EpiModel(object):
 
         return active
 
-    def _get_susceptible(self):
+    def _get_susceptible(self) -> Set:
         susceptible = set([node for node, deg in self.transitions.in_degree() if deg==0])
 
         if len(susceptible) == 0:
@@ -454,7 +471,7 @@ class EpiModel(object):
 
         return susceptible
 
-    def _get_infections(self):
+    def _get_infections(self) -> Dict:
         inf = {}
 
         for node_i, node_j, data in self.transitions.edges(data=True):
@@ -472,7 +489,7 @@ class EpiModel(object):
 
         return inf
 
-    def draw_model(self, ax=None, show=True):
+    def draw_model(self, ax: Union[plt.Axes, None] = None, show: bool = True) -> None:
         """
         Plot the model structure
 
@@ -516,7 +533,7 @@ class EpiModel(object):
         if show:
             plt.show()
 
-    def R0(self):
+    def R0(self) -> Union[float, None]:
         """
         Return the value of the basic reproductive ratio, $R_0$, for the model as defined
 
