@@ -198,7 +198,7 @@ class EpiModel(object):
             
         return diff
     
-    def plot(self, title: Union[str, None]= None, normed: bool = True, show: bool = True, ax: plt.Axes = None, **kwargs):
+    def plot(self, title: Union[str, None]= None, normed: bool = True, show: bool = True, ax: Union[plt.Axes, None] = None, **kwargs):
         """
         Convenience function for plotting
         
