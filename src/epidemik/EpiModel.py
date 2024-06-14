@@ -279,8 +279,13 @@ class EpiModel(object):
             Starting time
         - seasonality: numpy array or function, optional
             Array of seasonal factors or function of the form
-            
-                  seasonality(time: int, population: np.ndarray, pos:dict )
+
+                  seasonality(t: int, population: np.ndarray, pos:dict )
+
+            The population array has the population of each compartment at time t,
+            and the pos dict maps the compartment name to the position in the
+            population array
+
         - kwargs: keyword arguments
             Initial population of each compartment
         
@@ -369,7 +374,11 @@ class EpiModel(object):
         - seasonality: numpy array or function, optional
             Array of seasonal factors or function of the form
 
-                  seasonality(time: int, population: np.ndarray, pos:dict )
+                  seasonality(t: int, population: np.ndarray, pos:dict )
+
+            The population array has the population of each compartment at time t,
+            and the pos dict maps the compartment name to the position in the
+            population array
         - kwargs: keyword arguments
             Initial population of each compartment
         
