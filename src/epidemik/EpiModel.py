@@ -14,6 +14,7 @@ from numpy import random
 import scipy.integrate
 import pandas as pd
 import matplotlib.pyplot as plt
+from typing import Callable
 
 from .utils import *
 
@@ -190,7 +191,12 @@ class EpiModel(object):
 
                 if self.seasonality is not None:
                     curr_t = int(time)%365
-                    season = float(self.seasonality[curr_t])
+
+                    if callable(self.seasonality):
+                        season = self.seasonality(curr_t, population, pos)        
+                    else:
+                        season = float(self.seasonality[curr_t])
+                    
                     rate *= season
                 
             diff[pos[source]] -= rate
@@ -262,7 +268,7 @@ class EpiModel(object):
         else:
             raise AttributeError("'EpiModel' object has no attribute '%s'" % name)
 
-    def simulate(self, timesteps: int, t_min: int = 1, seasonality: Union[np.ndarray, None] = None, **kwargs) -> None:
+    def simulate(self, timesteps: int, t_min: int = 1, seasonality: Union[Callable[[int, np.ndarray, dict], float], np.ndarray, None] = None, **kwargs) -> None:
         """
         Stochastically simulate the epidemic model
         
@@ -271,8 +277,10 @@ class EpiModel(object):
             Number of time steps to simulate
         - t_min: int, optional
             Starting time
-        - seasonality: numpy array, optional
-            Array of seasonal factors
+        - seasonality: numpy array or function, optional
+            Array of seasonal factors or function of the form
+            
+                  seasonality(time: int, population: np.ndarray, pos:dict )
         - kwargs: keyword arguments
             Initial population of each compartment
         
@@ -318,8 +326,13 @@ class EpiModel(object):
                         rate *= pop[agent]/N
 
                         if self.seasonality is not None:
-                            curr_t = int(t)%365
-                            season = float(self.seasonality[curr_t])
+                            curr_t = int(time)%365
+
+                            if callable(self.seasonality):
+                                season = self.seasonality(curr_t, population, pos)        
+                            else:
+                                season = float(self.seasonality[curr_t])
+
                             rate *= season
 
                     prob[target] = rate
@@ -344,7 +357,7 @@ class EpiModel(object):
         values = np.array(values)
         self.values_ = pd.DataFrame(values[1:], columns=comps, index=time)
     
-    def integrate(self, timesteps: int , t_min: int = 1, seasonality: Union[np.ndarray, None] = None, **kwargs) -> None:
+    def integrate(self, timesteps: int , t_min: int = 1, seasonality: Union[Callable[[int, np.ndarray, dict], float], np.ndarray, None] = None, **kwargs) -> None:
         """
         Numerically integrate the epidemic model
         
@@ -353,8 +366,10 @@ class EpiModel(object):
             Number of time steps to integrate
         - t_min: int, optional
             Starting time
-        - seasonality: numpy array, optional
-            Array of seasonality values
+        - seasonality: numpy array or function, optional
+            Array of seasonal factors or function of the form
+
+                  seasonality(time: int, population: np.ndarray, pos:dict )
         - kwargs: keyword arguments
             Initial population of each compartment
         
