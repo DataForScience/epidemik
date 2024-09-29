@@ -37,6 +37,7 @@ class EpiModel(object):
         self.seasonality = None
         self.population = None
         self.orig_comps = None
+        self.demographics = False
         
         if compartments is not None:
             self.transitions.add_nodes_from([comp for comp in compartments])
@@ -76,6 +77,44 @@ class EpiModel(object):
         None
         """
         self.transitions.add_edge(source, target, rate=rate)
+
+    def add_birth_rate(self, rate: float, comps: Union[List, None] = None) -> None:
+        """
+        Add a birth rate to one or more compartments
+
+        Parameters:
+        - rate: float
+            Birth rate
+        - comps: list, optional, default=None
+            List of compartments to which to assign this birth rate. 
+            If None, apply to all compartments
+        """
+        self.demographics = True
+
+        if comps is None:
+            comps = self.transitions.nodes()
+
+        for comp in comps:
+            self.transitions.nodes[comp]['birth']=rate
+
+    def add_death_rate(self, rate: float, comps: Union[List, None] = None) -> None:
+        """
+        Add a birth rate to one or more compartments
+
+        Parameters:
+        - rate: float
+            Death rate
+        - comps: list, optional, default=None
+            List of compartments to which to assign this death rate. 
+            If None, apply to all compartments
+        """
+        self.demographics = True
+
+        if comps is None:
+            comps = self.transitions.nodes()
+
+        for comp in comps:
+            self.transitions.nodes[comp]['death']=rate
 
     def add_vaccination(self, source: str, target: str, rate: float, start: int) -> None:
         """
@@ -196,6 +235,19 @@ class EpiModel(object):
             diff[pos[source]] -= rate
             diff[pos[target]] += rate
             
+            # Population dynamics
+            if self.demographics:
+                for comp, data in self.transitions.nodes(data=True):
+                    comp_id = pos[comp]
+
+                    if "birth" in data:
+                        births = population[comp_id]*data["birth"]
+                        diff[comp_id] += births
+
+                    if "death" in data:
+                        deaths = population[comp_id]*data["death"]
+                        diff[comp_id] -= deaths
+
         return diff
     
     def plot(self, title: Union[str, None]= None, normed: bool = True, show: bool = True, ax: Union[plt.Axes, None] = None, **kwargs):
@@ -203,7 +255,7 @@ class EpiModel(object):
         Convenience function for plotting
         
         Parameters:
-        - title: string, optional
+        - title: string, optional, default=None
             Title of the plot
         - normed: bool, default=True
             Whether to normalize the values or not
@@ -338,6 +390,19 @@ class EpiModel(object):
 
                 for i in range(len(delta)):
                     new_pop[i] += delta[i]
+
+            # Population dynamics
+            if self.demographics:
+                for comp, data in self.transitions.nodes(data=True):
+                    comp_id = pos[comp]
+
+                    if "birth" in data:
+                        births = np.random.binomial(pop[comp_id], data["birth"])
+                        new_pop[comp_id] += births
+
+                    if "death" in data:
+                        deaths = np.random.binomial(pop[comp_id], data["death"])
+                        new_pop[comp_id] -= deaths
 
             values.append(new_pop)
 
@@ -498,20 +563,42 @@ class EpiModel(object):
         - show: bool, default=True
             Whether to call plt.show() or not
         """
+
+        trans = self.transitions.copy()
+
         try:
             from networkx.drawing.nx_agraph import graphviz_layout
-            pos=graphviz_layout(self.transitions, prog='dot', args='-Grankdir="LR"')
+            pos=graphviz_layout(trans, prog='dot', args='-Grankdir="LR"')
         except:
-            pos=nx.layout.spectral_layout(self.transitions)
+            pos=nx.layout.spectral_layout(trans)
+
+        pos = nx.layout.rescale_layout_dict(pos)
+        pos2 = pos.copy()
+
+        if self.demographics:
+            for comp, data in self.transitions.nodes(data=True):
+                if "birth" in data:
+                    trans.add_edge("_b_" + comp, comp, rate=data["birth"])
+                if "death" in data:
+                    trans.add_edge(comp, "_d_" + comp, rate=data["death"])
 
         node_colors = []
 
-        for node in self.transitions.nodes():
-            node_colors.append(epi_colors[node[0]])
+        for node in trans.nodes():
+            if node.startswith("_b_"):
+                node_colors.append('white')
+                orig_pos = pos[node[3:]]
+                pos[node] = [orig_pos[0], orig_pos[1]+1]
+            elif node.startswith("_d_"):
+                node_colors.append('white')
+                orig_pos = pos[node[3:]]
+                pos[node] = [orig_pos[0], orig_pos[1]-1]
+            else:
+                node_colors.append(epi_colors[node[0]])
 
         edge_labels = {}
 
-        for node_i, node_j, data in self.transitions.edges(data=True):
+        for node_i, node_j, data in trans.edges(data=True):
             edge = (node_i, node_j)
 
             if "agent" in data:
@@ -522,13 +609,13 @@ class EpiModel(object):
             else:
                 edge_labels[edge] = ""
 
-
         if ax is None:
             fig, ax = plt.subplots(1, figsize=(10, 2))
 
-        nx.draw(self.transitions, pos, with_labels=True, arrows=True, node_shape='H', 
-        font_color='k', node_color=node_colors, node_size=1000, ax=ax)
-        nx.draw_networkx_edge_labels(self.transitions, pos, edge_labels=edge_labels, ax=ax)
+        nx.draw(trans, pos, with_labels=False, arrows=True, node_shape='H', 
+        node_color=node_colors, node_size=1000, ax=ax)
+        nx.draw_networkx_edge_labels(trans, pos, edge_labels=edge_labels, ax=ax)
+        nx.draw_networkx_labels(self.transitions, pos2, font_color='k')
 
         if show:
             plt.show()
