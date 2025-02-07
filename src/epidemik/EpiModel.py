@@ -3,7 +3,10 @@
 # @author Bruno Goncalves
 ######################################################
 
+from typing import Dict, List, Set, Union
 import warnings
+import string
+
 import networkx as nx
 import numpy as np
 from numpy import linalg
@@ -11,7 +14,7 @@ from numpy import random
 import scipy.integrate
 import pandas as pd
 import matplotlib.pyplot as plt
-import string
+
 from .utils import *
 
 class EpiModel(object):
@@ -34,11 +37,12 @@ class EpiModel(object):
         self.seasonality = None
         self.population = None
         self.orig_comps = None
+        self.demographics = False
         
         if compartments is not None:
             self.transitions.add_nodes_from([comp for comp in compartments])
     
-    def add_interaction(self, source, target, agent, rate):  
+    def add_interaction(self, source: str, target: str, agent: str, rate: float) -> None:  
         """
         Add an interaction between two compartments
         
@@ -57,7 +61,7 @@ class EpiModel(object):
         """      
         self.transitions.add_edge(source, target, agent=agent, rate=rate)        
         
-    def add_spontaneous(self, source, target, rate):
+    def add_spontaneous(self, source: str, target: str, rate: float) -> None:
         """
         Add a spontaneous transition between two compartments
         
@@ -74,7 +78,45 @@ class EpiModel(object):
         """
         self.transitions.add_edge(source, target, rate=rate)
 
-    def add_vaccination(self, source, target, rate, start):
+    def add_birth_rate(self, rate: float, comps: Union[List, None] = None) -> None:
+        """
+        Add a birth rate to one or more compartments
+
+        Parameters:
+        - rate: float
+            Birth rate
+        - comps: list, optional, default=None
+            List of compartments to which to assign this birth rate. 
+            If None, apply to all compartments
+        """
+        self.demographics = True
+
+        if comps is None:
+            comps = self.transitions.nodes()
+
+        for comp in comps:
+            self.transitions.nodes[comp]['birth']=rate
+
+    def add_death_rate(self, rate: float, comps: Union[List, None] = None) -> None:
+        """
+        Add a birth rate to one or more compartments
+
+        Parameters:
+        - rate: float
+            Death rate
+        - comps: list, optional, default=None
+            List of compartments to which to assign this death rate. 
+            If None, apply to all compartments
+        """
+        self.demographics = True
+
+        if comps is None:
+            comps = self.transitions.nodes()
+
+        for comp in comps:
+            self.transitions.nodes[comp]['death']=rate
+
+    def add_vaccination(self, source: str, target: str, rate: float, start: int) -> None:
         """
         Add a vaccination transition between two compartments
         
@@ -93,7 +135,14 @@ class EpiModel(object):
         """
         self.transitions.add_edge(source, target, rate=rate, start=start)
 
-    def add_age_structure(self, matrix, population):
+    def add_age_structure(self, matrix: List, population: List) -> List[List]:
+        """ 
+        Add a vaccination transition between two compartments
+        
+        Parameters:
+        - matrix: List
+        - population: List
+        """
         self.contact = np.asarray(matrix)
         self.population = np.asarray(population).flatten()
 
@@ -131,7 +180,7 @@ class EpiModel(object):
 
         self.transitions = model.transitions
         
-    def _new_cases(self, population, time, pos):
+    def _new_cases(self, time: float, population: np.ndarray,  pos: Dict) -> np.ndarray:
         """
         Internal function used by integration routine
         
@@ -186,14 +235,27 @@ class EpiModel(object):
             diff[pos[source]] -= rate
             diff[pos[target]] += rate
             
+            # Population dynamics
+            if self.demographics:
+                for comp, data in self.transitions.nodes(data=True):
+                    comp_id = pos[comp]
+
+                    if "birth" in data:
+                        births = population[comp_id]*data["birth"]
+                        diff[comp_id] += births
+
+                    if "death" in data:
+                        deaths = population[comp_id]*data["death"]
+                        diff[comp_id] -= deaths
+
         return diff
     
-    def plot(self, title=None, normed=True, show=True, ax=None, **kwargs):
+    def plot(self, title: Union[str, None]= None, normed: bool = True, show: bool = True, ax: Union[plt.Axes, None] = None, **kwargs):
         """
         Convenience function for plotting
         
         Parameters:
-        - title: string, optional
+        - title: string, optional, default=None
             Title of the plot
         - normed: bool, default=True
             Whether to normalize the values or not
@@ -235,7 +297,7 @@ class EpiModel(object):
             print(e)
             raise NotInitialized('You must call integrate() or simulate() first')
     
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> pd.Series:
         """
         Dynamic method to return the individual compartment values
         
@@ -252,7 +314,7 @@ class EpiModel(object):
         else:
             raise AttributeError("'EpiModel' object has no attribute '%s'" % name)
 
-    def simulate(self, timesteps, t_min=1, seasonality=None, **kwargs):
+    def simulate(self, timesteps: int, t_min: int = 1, seasonality: Union[np.ndarray, None] = None, **kwargs) -> None:
         """
         Stochastically simulate the epidemic model
         
@@ -329,12 +391,25 @@ class EpiModel(object):
                 for i in range(len(delta)):
                     new_pop[i] += delta[i]
 
+            # Population dynamics
+            if self.demographics:
+                for comp, data in self.transitions.nodes(data=True):
+                    comp_id = pos[comp]
+
+                    if "birth" in data:
+                        births = np.random.binomial(pop[comp_id], data["birth"])
+                        new_pop[comp_id] += births
+
+                    if "death" in data:
+                        deaths = np.random.binomial(pop[comp_id], data["death"])
+                        new_pop[comp_id] -= deaths
+
             values.append(new_pop)
 
         values = np.array(values)
         self.values_ = pd.DataFrame(values[1:], columns=comps, index=time)
     
-    def integrate(self, timesteps, t_min=1, seasonality=None, **kwargs):
+    def integrate(self, timesteps: int , t_min: int = 1, seasonality: Union[np.ndarray, None] = None, **kwargs) -> None:
         """
         Numerically integrate the epidemic model
         
@@ -375,7 +450,17 @@ class EpiModel(object):
         time = np.arange(t_min, t_min+timesteps, 1)
 
         self.seasonality = seasonality
-        values = pd.DataFrame(scipy.integrate.odeint(self._new_cases, population, time, args=(pos,)), columns=pos.keys(), index=time)
+        values = pd.DataFrame(
+                    scipy.integrate.solve_ivp(
+                        fun=self._new_cases,
+                        t_span=(time[0], time[-1]), 
+                        y0=population,
+                        t_eval=time,
+                        args=(pos,),
+                        method='LSODA',
+                    ).y.T, columns=pos.keys(), index=time
+                )
+
 
         if self.population is None:
             self.values_ = values
@@ -398,7 +483,7 @@ class EpiModel(object):
             new_values = pd.concat([old_values, self.values_.iloc[[-1]]])
             self.values_ = new_values
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """
         Return a string representation of the EpiModel object
         
@@ -433,7 +518,7 @@ class EpiModel(object):
 
         return text
 
-    def _get_active(self):
+    def _get_active(self) -> Set:
         active = set()
 
         for node_i, node_j, data in self.transitions.edges(data=True):
@@ -444,7 +529,7 @@ class EpiModel(object):
 
         return active
 
-    def _get_susceptible(self):
+    def _get_susceptible(self) -> Set:
         susceptible = set([node for node, deg in self.transitions.in_degree() if deg==0])
 
         if len(susceptible) == 0:
@@ -454,7 +539,7 @@ class EpiModel(object):
 
         return susceptible
 
-    def _get_infections(self):
+    def _get_infections(self) -> Dict:
         inf = {}
 
         for node_i, node_j, data in self.transitions.edges(data=True):
@@ -472,7 +557,7 @@ class EpiModel(object):
 
         return inf
 
-    def draw_model(self, ax=None, show=True):
+    def draw_model(self, ax: Union[plt.Axes, None] = None, show: bool = True) -> None:
         """
         Plot the model structure
 
@@ -481,20 +566,42 @@ class EpiModel(object):
         - show: bool, default=True
             Whether to call plt.show() or not
         """
+
+        trans = self.transitions.copy()
+
         try:
             from networkx.drawing.nx_agraph import graphviz_layout
-            pos=graphviz_layout(self.transitions, prog='dot', args='-Grankdir="LR"')
+            pos=graphviz_layout(trans, prog='dot', args='-Grankdir="LR"')
         except:
-            pos=nx.layout.spectral_layout(self.transitions)
+            pos=nx.layout.spectral_layout(trans)
+    
+        pos = nx.layout.rescale_layout_dict(pos)
+        pos2 = pos.copy()
+
+        if self.demographics:
+            for comp, data in self.transitions.nodes(data=True):
+                if "birth" in data:
+                    trans.add_edge("_b_" + comp, comp, rate=data["birth"])
+                if "death" in data:
+                    trans.add_edge(comp, "_d_" + comp, rate=data["death"])
 
         node_colors = []
 
-        for node in self.transitions.nodes():
-            node_colors.append(epi_colors[node[0]])
+        for node in trans.nodes():
+            if node.startswith("_b_"):
+                node_colors.append('white')
+                orig_pos = pos[node[3:]]
+                pos[node] = [orig_pos[0], orig_pos[1]+1]
+            elif node.startswith("_d_"):
+                node_colors.append('white')
+                orig_pos = pos[node[3:]]
+                pos[node] = [orig_pos[0], orig_pos[1]-1]
+            else:
+                node_colors.append(epi_colors[node[0]])
 
         edge_labels = {}
 
-        for node_i, node_j, data in self.transitions.edges(data=True):
+        for node_i, node_j, data in trans.edges(data=True):
             edge = (node_i, node_j)
 
             if "agent" in data:
@@ -505,18 +612,18 @@ class EpiModel(object):
             else:
                 edge_labels[edge] = ""
 
-
         if ax is None:
             fig, ax = plt.subplots(1, figsize=(10, 2))
 
-        nx.draw(self.transitions, pos, with_labels=True, arrows=True, node_shape='H', 
-        font_color='k', node_color=node_colors, node_size=1000, ax=ax)
-        nx.draw_networkx_edge_labels(self.transitions, pos, edge_labels=edge_labels, ax=ax)
+        nx.draw(trans, pos, with_labels=False, arrows=True, node_shape='H', 
+        node_color=node_colors, node_size=1000, ax=ax)
+        nx.draw_networkx_edge_labels(trans, pos, edge_labels=edge_labels, ax=ax)
+        nx.draw_networkx_labels(self.transitions, pos2, font_color='k')
 
         if show:
             plt.show()
 
-    def R0(self):
+    def R0(self) -> Union[float, None]:
         """
         Return the value of the basic reproductive ratio, $R_0$, for the model as defined
 
