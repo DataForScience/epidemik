@@ -81,7 +81,7 @@ class NetworkEpiModel(EpiModel):
                 continue
 
             current_active = list(active_nodes)
-            np.random.shuffle(current_active)
+            self.rng.shuffle(current_active)
 
             for node_i in current_active:
                 state_i = population[t-1, node_i]
@@ -89,13 +89,13 @@ class NetworkEpiModel(EpiModel):
                 if state_i in infections:
                     # contact each neighbour to see if we infect them
                     NN = list(self.network.neighbors(node_i))
-                    np.random.shuffle(NN)
+                    self.rng.shuffle(NN)
 
                     for node_j in NN:
                         state_j = population[t-1, node_j]
 
                         if state_j in infections[state_i]:
-                            prob = np.random.random()
+                            prob = self.rng.random()
 
                             if prob < infections[state_i][state_j]['rate']:
                                 new_state = infections[state_i][state_j]['target']

@@ -22,7 +22,7 @@ class MetaEpiModel:
     
         Provides a way to implement and numerically integrate 
     """
-    def __init__(self, travel_graph, populations, population='Population'):
+    def __init__(self, travel_graph, populations, population='Population', seed=None):
         """
         Initialize the EpiModel object
         
@@ -43,8 +43,13 @@ class MetaEpiModel:
         self.prototype = None
         self.seasonality = None
 
+        if seed is None:
+            seed = int(time.time()) + os.getpid()
+
+        self.rng = np.random.default_rng(seed=seed)
+
         for state in travel_graph.index:
-            models[state] = EpiModel() 
+            models[state] = EpiModel(rng=self.rng) 
             if self.transitions is None:
                 self.transitions = models[state].transitions
                 self.prototype = models[state] 
@@ -153,7 +158,7 @@ class MetaEpiModel:
         def travel_step(x, populations):
             n = populations.loc[x.name]
             p = travel.loc[x.name].values.tolist()
-            output = np.random.multinomial(n, p)
+            output = self.rng.multinomial(n, p)
 
             return pd.Series(output, index=travel.columns)
         

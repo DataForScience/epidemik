@@ -6,6 +6,8 @@
 from typing import Dict, List, Set, Union
 import warnings
 import string
+import time
+import os
 
 import networkx as nx
 import numpy as np
@@ -22,7 +24,7 @@ class EpiModel(object):
     
         Provides a way to implement and numerically integrate 
     """
-    def __init__(self, compartments=None):
+    def __init__(self, compartments=None, seed=None, rng=None):
         """
         Initialize the EpiModel object
         
@@ -38,7 +40,15 @@ class EpiModel(object):
         self.population = None
         self.orig_comps = None
         self.demographics = False
-        
+
+        if seed is None:
+            seed = int(time.time()) + os.getpid()
+
+        if rng is None:
+            self.rng = np.random.default_rng(seed=seed)
+        else:
+            self.rng = rng
+                
         if compartments is not None:
             self.transitions.add_nodes_from([comp for comp in compartments])
     
@@ -397,11 +407,11 @@ class EpiModel(object):
                     comp_id = pos[comp]
 
                     if "birth" in data:
-                        births = np.random.binomial(pop[comp_id], data["birth"])
+                        births = self.rng.binomial(pop[comp_id], data["birth"])
                         new_pop[comp_id] += births
 
                     if "death" in data:
-                        deaths = np.random.binomial(pop[comp_id], data["death"])
+                        deaths = self.rng.binomial(pop[comp_id], data["death"])
                         new_pop[comp_id] -= deaths
 
             values.append(new_pop)
@@ -438,7 +448,7 @@ class EpiModel(object):
             else:
                 total_pop = self.population.sum()
                 p = np.copy(self.population)/total_pop
-                n = np.random.multinomial(kwargs[comp], p, 1)[0]
+                n = self.rng.multinomial(kwargs[comp], p, 1)[0]
 
                 for i, age in enumerate(string.ascii_lowercase[:len(p)]):
                     comp_age = comp + '_' + age
