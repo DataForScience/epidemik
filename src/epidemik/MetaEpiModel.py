@@ -24,7 +24,14 @@ class MetaEpiModel:
 
     Provides a way to implement and numerically integrate
     """
-    def __init__(self, travel_graph: pd.DataFrame, populations: pd.DataFrame, population: str ='Population', seed: int | None = None):
+
+    def __init__(
+        self,
+        travel_graph: pd.DataFrame,
+        populations: pd.DataFrame,
+        population: str = "Population",
+        seed: int | None = None,
+    ):
         """
         Initialize the EpiModel object
 
@@ -75,7 +82,7 @@ class MetaEpiModel:
         )
         return text
 
-    def add_interaction(self, source: str, target: str, agent: str, **rates) -> None:  
+    def add_interaction(self, source: str, target: str, agent: str, **rates) -> None:
         """
         Add an interaction between two compartments_
 
@@ -148,7 +155,9 @@ class MetaEpiModel:
 
         return self.models[state]
 
-    def _initialize_populations(self, susceptible: str, population: Union[pd.DataFrame, None] =None) -> None:
+    def _initialize_populations(
+        self, susceptible: str, population: Union[pd.DataFrame, None] = None
+    ) -> None:
         columns = list(self.transitions.nodes())
         self.compartments_ = pd.DataFrame(
             np.zeros((self.travel_graph.shape[0], len(columns)), dtype="int"),
@@ -164,7 +173,9 @@ class MetaEpiModel:
                 state, population
             ]
 
-    def _run_travel(self, compartments_: pd.DataFrame, travel: pd.DataFrame) -> pd.DataFrame:
+    def _run_travel(
+        self, compartments_: pd.DataFrame, travel: pd.DataFrame
+    ) -> pd.DataFrame:
         def travel_step(x, populations: pd.DataFrame) -> pd.Series:
             n = populations.loc[x.name]
             p = travel.loc[x.name].values.tolist()
@@ -192,9 +203,13 @@ class MetaEpiModel:
             )
 
     def simulate(
-            self, timestamp: int, t_min: int = 1, 
-            seasonality=None, seed_state: [str, None] = None, 
-            susceptible: str ='S', **kwargs
+        self,
+        timestamp: int,
+        t_min: int = 1,
+        seasonality=None,
+        seed_state: [str, None] = None,
+        susceptible: str = "S",
+        **kwargs,
     ) -> None:
         if seed_state is None:
             raise NotInitialized("You have to specify the seed_state")
@@ -223,7 +238,9 @@ class MetaEpiModel:
     def draw_model(self) -> None:
         return self.models.iloc[0].draw_model()
 
-    def plot(self, title: Union[str, None] = None, normed: bool = True, layout=None, **kwargs) -> None:
+    def plot(
+        self, title: Union[str, None] = None, normed: bool = True, layout=None, **kwargs
+    ) -> None:
         if layout is None:
             n_pop = self.travel_graph.shape[0]
             N = int(np.round(np.sqrt(n_pop), 0) + 1)

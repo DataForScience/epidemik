@@ -27,7 +27,9 @@ class NetworkEpiModel(EpiModel):
     def integrate(self, timesteps, **kwargs):
         raise NotImplementedError("Network Models don't support numerical integration")
 
-    def add_interaction(self, source: str, target: str, agent: str, rescale: bool = False, **rates) -> None:
+    def add_interaction(
+        self, source: str, target: str, agent: str, rescale: bool = False, **rates
+    ) -> None:
         if rescale:
             rate /= self.kavg_
 
@@ -43,9 +45,9 @@ class NetworkEpiModel(EpiModel):
         if target not in self.interactions[source]:
             self.interactions[source] = {}
 
-        self.interactions[source][agent] = {'target': target, 'rate': rate}
-        
-    def add_spontaneous(self, source: str, target: str,  **rates):
+        self.interactions[source][agent] = {"target": target, "rate": rate}
+
+    def add_spontaneous(self, source: str, target: str, **rates):
         self.params.update(rates)
         rate = list(rates.keys())[0]
 
@@ -57,7 +59,6 @@ class NetworkEpiModel(EpiModel):
             self.spontaneous[source] = {}
 
         self.spontaneous[source][target] = rate
-
 
     def simulate(self, timesteps: int, seeds, **kwargs) -> None:
         """Stochastically simulate the epidemic model"""
