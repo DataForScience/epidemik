@@ -24,7 +24,7 @@ class MetaEpiModel:
 
     Provides a way to implement and numerically integrate
     """
-    def __init__(self, travel_graph: pd.DataFrame, populations: pd.DataFrame, population: str ='Population'):
+    def __init__(self, travel_graph: pd.DataFrame, populations: pd.DataFrame, population: str ='Population', seed: int | None = None):
         """
         Initialize the EpiModel object
 

@@ -16,8 +16,8 @@ class MetaEpiModelTestCase(unittest.TestCase):
         self.SIR = MetaEpiModel(self.travel, self.population)
         self.beta = 0.3
         self.mu = 0.1
-        self.SIR.add_interaction("S", "I", "I", self.beta)
-        self.SIR.add_spontaneous("I", "R", self.mu)
+        self.SIR.add_interaction("S", "I", "I", beta=self.beta)
+        self.SIR.add_spontaneous("I", "R", mu=self.mu)
 
     def test_number_populations(self):
         self.assertEqual(self.SIR.travel_graph.shape[0], 2)
