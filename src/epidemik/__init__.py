@@ -11,4 +11,4 @@ from .EpiModel import EpiModel
 from .NetworkEpiModel import NetworkEpiModel
 from .MetaEpiModel import MetaEpiModel
 
-__version__ = "0.1"
+__version__ = "0.1.1"
