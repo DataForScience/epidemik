@@ -40,6 +40,7 @@ class EpiModel(object):
         self.population = None
         self.orig_comps = None
         self.demographics = False
+        self.params = {}
 
         if seed is None:
             seed = int(time.time()) + os.getpid()
@@ -48,11 +49,15 @@ class EpiModel(object):
             self.rng = np.random.default_rng(seed=seed)
         else:
             self.rng = rng
-                
+
         if compartments is not None:
             self.transitions.add_nodes_from([comp for comp in compartments])
     
-    def add_interaction(self, source: str, target: str, agent: str, rate: float) -> None:  
+    def add_interaction(self, 
+                        source: str, 
+                        target: str, 
+                        agent: str, 
+                        **rates) -> None:  
         """
         Add an interaction between two compartments
         
@@ -63,15 +68,19 @@ class EpiModel(object):
             Name of the target compartment
         - agent: string
             Name of the agent
-        - rate: float
-            Rate of the interaction
+        - params: string
+            Named parameters for the interaction
         
         Returns:
         None
-        """      
-        self.transitions.add_edge(source, target, agent=agent, rate=rate)        
+        """
+
+        self.params.update(rates)
+        rates = list(rates.keys())
+
+        self.transitions.add_edge(source, target, agent=agent, rate=rates[0])        
         
-    def add_spontaneous(self, source: str, target: str, rate: float) -> None:
+    def add_spontaneous(self, source: str, target: str, **rates) -> None:
         """
         Add a spontaneous transition between two compartments
         
@@ -86,7 +95,11 @@ class EpiModel(object):
         Returns:
         None
         """
-        self.transitions.add_edge(source, target, rate=rate)
+
+        self.params.update(rates)
+        rates = list(rates.keys())
+
+        self.transitions.add_edge(source, target, rate=rates[0])
 
     def add_birth_rate(self, rate: float, comps: Union[List, None] = None) -> None:
         """
@@ -224,7 +237,8 @@ class EpiModel(object):
             target = edge[1]
             trans = edge[2]
             
-            rate = trans['rate']*population[pos[source]]
+            rate_val = self.params[trans['rate']]
+            rate = rate_val*population[pos[source]]
             
             if 'start' in trans and trans['start'] >= time:
                 continue
@@ -370,7 +384,7 @@ class EpiModel(object):
                     source = pos[comp]
                     target = pos[node_j]
 
-                    rate = data['rate']
+                    rate = self.params[data['rate']]
 
                     if 'start' in data and data['start'] >= t:
                         continue
@@ -505,21 +519,24 @@ class EpiModel(object):
               (self.transitions.number_of_nodes(), 
                self.transitions.number_of_edges())
         
+        text += "Parameters:\n"
+        for rate, value in self.params.items():
+            text += "%s= %f\n" % (rate, value)
+        text += "\n\nTransitions:\n"
+
         for edge in self.transitions.edges(data=True):
             source = edge[0]
             target = edge[1]
             trans = edge[2]
-            
-            rate = trans['rate']
-
+        
             if 'agent' in trans:
                 agent = trans['agent']
-                text += "%s + %s = %s %f\n" % (source, agent, target, rate)
+                text += "%s + %s = %s %s\n" % (source, agent, target, trans['rate'])
             elif 'start' in trans:
                 start = trans['start']
-                text+="%s -> %s %f starting at %s days\n" % (source, target, rate, start)
+                text+="%s -> %s %s starting at %s days\n" % (source, target, rate, start)
             else:
-                text+="%s -> %s %f\n" % (source, target, rate)
+                text+="%s -> %s %s\n" % (source, target, rate)
         
         R0 = self.R0()
 
@@ -664,7 +681,7 @@ class EpiModel(object):
 
         try:
             for node_i, node_j, data in self.transitions.edges(data=True):
-                rate = data['rate']
+                rate = self.params[data['rate']]
 
                 if "agent" in data:
                     target = pos[node_j]

@@ -70,7 +70,7 @@ class MetaEpiModel:
         text = "Metapopulation model with %u populations\n\nThe disease is defined by an %s" % (self.travel_graph.shape[0], model_text)
         return text 
 
-    def add_interaction(self, source, target, agent, rate):  
+    def add_interaction(self, source, target, agent, **rates):  
         """
         Add an interaction between two compartments_
         
@@ -88,9 +88,9 @@ class MetaEpiModel:
         None
         """    
         for state in self.models:  
-            self.models[state].add_interaction(source, target, agent, rate)       
+            self.models[state].add_interaction(source, target, agent,  **rates)       
         
-    def add_spontaneous(self, source, target, rate):
+    def add_spontaneous(self, source, target,  **rates):
         """
         Add a spontaneous transition between two compartments_
         
@@ -106,9 +106,9 @@ class MetaEpiModel:
         None
         """
         for state in self.models:  
-            self.models[state].add_spontaneous(source, target, rate)      
+            self.models[state].add_spontaneous(source, target,  **rates)      
 
-    def add_vaccination(self, source, target, rate, start):
+    def add_vaccination(self, source, target, start,  **rates):
         """
         Add a vaccination transition between two compartments_
         
@@ -126,7 +126,7 @@ class MetaEpiModel:
         None
         """
         for state in self.models:  
-            self.models[state].add_vaccination(source, target, rate, start)
+            self.models[state].add_vaccination(source, target, start, **rates)
     
     def R0(self):
         key = list(self.models.keys())[0]

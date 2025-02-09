@@ -20,14 +20,17 @@ class NetworkEpiModel(EpiModel):
         self.kavg_ = 2*network.number_of_edges()/network.number_of_nodes() 
         self.spontaneous = {}
         self.interactions = {}
+        self.params = {}
 
     def integrate(self, timesteps, **kwargs):
         raise NotImplementedError("Network Models don't support numerical integration")
 
-    def add_interaction(self, source, target, agent, rate, rescale=False):
+    def add_interaction(self, source, target, agent, rescale=False, **rates):
         if rescale:
             rate /= self.kavg_
 
+        self.params.update(rates)
+        rate = list(rates.keys())[0]
         super(NetworkEpiModel, self).add_interaction(source, target, agent=agent, rate=rate)
 
         if source not in self.interactions:
@@ -36,9 +39,13 @@ class NetworkEpiModel(EpiModel):
         if target not in self.interactions[source]:
             self.interactions[source] = {}
 
+
         self.interactions[source][agent] = {'target': target, 'rate': rate}
         
-    def add_spontaneous(self, source, target, rate):
+    def add_spontaneous(self, source, target, **rates):
+        self.params.update(rates)
+        rate = list(rates.keys())[0]
+
         super(NetworkEpiModel, self).add_spontaneous(source, target, rate=rate)
         if source not in self.spontaneous:
             self.spontaneous[source] = {}
@@ -97,7 +104,8 @@ class NetworkEpiModel(EpiModel):
                         if state_j in infections[state_i]:
                             prob = self.rng.random()
 
-                            if prob < infections[state_i][state_j]['rate']:
+                            rate = self.params[infections[state_i][state_j]['rate']]
+                            if prob < rate:
                                 new_state = infections[state_i][state_j]['target']
                                 population[t, node_j] = new_state
 
@@ -110,7 +118,8 @@ class NetworkEpiModel(EpiModel):
                     prob = np.zeros(len(pos))
 
                     for target in self.spontaneous[state_i]:
-                        prob[pos[target]] = self.spontaneous[state_i][target]
+                        rate = self.params[self.spontaneous[state_i]['target']]
+                        prob[pos[target]] = rate
 
                     prob[pos[state_i]] = 1-np.sum(prob)
 
