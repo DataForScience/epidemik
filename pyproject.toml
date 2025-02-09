@@ -1,6 +1,7 @@
 [project]
 name = "epidemik"
-dynamic = ["version"]
+version = "0.1.2"
+
 authors = [
   { name="Bruno Gonçalves", email="bgoncalves@data4sci.com" },
 ]
@@ -17,21 +18,24 @@ dependencies = [
  "networkx>=3",
  "numpy>=1.20",
  "pandas>=2.0",
- "scipy>=1.10",
- "yaml>=6.0",
- "tqdm>=4"
+ "scipy>=1.7",
+ "tqdm>=4",
+ "pyyaml (>=6.0.2,<7.0.0)"
 ]
 [project.urls]
 Homepage = "https://github.com/DataForScience/epidemik"
 Issues = "https://github.com/DataForScience/epidemik/issues"
 Documentation = "https://epidemik.readthedocs.io/"
 
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+[tool.poetry-dynamic-versioning]
+enable = true
 
-[tool.setuptools.dynamic]
-version = {attr = "epidemik.__version__"}
+[build-system]
+requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
+build-backend = "poetry_dynamic_versioning.backend"
+
+[tool.poetry-dynamic-versioning.from-file]
+source = "src/epidemik/__init__.py"
 
 [tool.pytest.ini_options]
 pythonpath = [
