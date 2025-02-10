@@ -32,7 +32,7 @@ class MetaEpiModel:
         travel_graph: pd.DataFrame,
         populations: pd.DataFrame,
         population: str = "Population",
-        seed: Union[int | None] = None,
+        seed: Union[int, None] = None,
     ):
         """
         Initialize the EpiModel object
