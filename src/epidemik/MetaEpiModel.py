@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.collections import PatchCollection
 
+from typing import Union
+
 from .EpiModel import *
 
 from tqdm import tqdm
@@ -30,7 +32,7 @@ class MetaEpiModel:
         travel_graph: pd.DataFrame,
         populations: pd.DataFrame,
         population: str = "Population",
-        seed: int | None = None,
+        seed: Union[int | None] = None,
     ):
         """
         Initialize the EpiModel object
