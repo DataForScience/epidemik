@@ -20,7 +20,7 @@ dependencies = [
  "pandas>=2.0",
  "scipy>=1.7",
  "tqdm>=4",
- "pyyaml (>=6.0.2,<7.0.0)"
+ "pyyaml (>=6.0.2,<7.0.0)",
 ]
 [project.urls]
 Homepage = "https://github.com/DataForScience/epidemik"
@@ -29,6 +29,9 @@ Documentation = "https://epidemik.readthedocs.io/"
 
 [tool.poetry-dynamic-versioning]
 enable = true
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.4"
 
 [build-system]
 requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
