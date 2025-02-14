@@ -3,7 +3,7 @@
 # @author Bruno Goncalves
 ######################################################
 
-from typing import Dict, List, Set, Union
+from typing import Dict, List, Set, Union, Self
 import warnings
 import string
 import time
@@ -789,6 +789,33 @@ class EpiModel(object):
         with open(filename, "wt") as f:
             f.write(self.__repr__())
 
+    def list_models() -> List[str]:
+        """
+        List the models available in the official repository
+        """
+        remote_path = utils.get_remote_path()
+        remote_path = os.path.join(remote_path, "model_list.txt")
+
+        cache_dir = utils.get_cache_directory()
+
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir)
+
+        local_path = os.path.join(cache_dir, "model_list.txt")
+
+        # Always get the latest version
+        urlretrieve(remote_path, local_path)
+        models = [line.strip() for line in open(local_path, "rt").readlines()]
+
+        # Add any user models
+        if os.path.exists(cache_dir):
+            for file in os.listdir(cache_dir):
+                if file.endswith(".yaml"):
+                    models.append(file)
+
+        # Make sure to remove duplicates
+        return sorted(set(models))
+
     def load_model(filename: str) -> None:
         """
         Load the model from a file
@@ -824,26 +851,24 @@ class EpiModel(object):
 
         return model
 
-
-    def download_model(filename: str, repo: Union[str, None] = None) -> None:
+    def download_model(
+        filename: str, repo: Union[str, None] = None, load_model: bool = True
+    ) -> Union[None, Self]:
         """
         Download model from offical repository
         """
-        if repo is None:
-            repo = utils.OFFICIAL_REPO
+        remote_path = utils.get_remote_path(repo)
+        remote_path = os.path.join(remote_path, filename)
 
-        parsed_repo = urlparse(repo)
+        cache_dir = utils.get_cache_directory()
 
-        if parsed_repo.netloc == 'github.com':
-            repo = repo.replace('github.com', 'raw.githubusercontent.com')
-            remote_path = repo + os.path.join('refs/heads/models/models/', filename)
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir)
 
-        if not os.path.exists(utils.LOCAL_DIRECTORY):
-            os.makedirs(utils.LOCAL_DIRECTORY)
-
-        local_path = os.path.join(utils.LOCAL_DIRECTORY, filename)
+        local_path = os.path.join(cache_dir, filename)
 
         if not os.path.exists(local_path):
             urlretrieve(remote_path, local_path)
 
-        return EpiModel.load_model(local_path)
+        if load_model:
+            return EpiModel.load_model(local_path)

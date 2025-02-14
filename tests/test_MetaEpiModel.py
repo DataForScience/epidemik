@@ -1,7 +1,7 @@
 import unittest
 import pandas as pd
 from epidemik import MetaEpiModel
-from epidemik.utils import NotInitialized
+from epidemik.utils import NotImplementedError, NotInitialized
 
 
 class MetaEpiModelTestCase(unittest.TestCase):

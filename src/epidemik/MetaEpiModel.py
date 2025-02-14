@@ -5,6 +5,8 @@
 
 import networkx as nx
 import numpy as np
+import time
+import os
 from numpy import linalg
 from numpy import random
 import pandas as pd
@@ -14,7 +16,8 @@ from matplotlib.collections import PatchCollection
 
 from typing import Union
 
-from .EpiModel import *
+from .EpiModel import EpiModel
+from . import utils
 
 from tqdm import tqdm
 
@@ -214,7 +217,7 @@ class MetaEpiModel:
         **kwargs,
     ) -> None:
         if seed_state is None:
-            raise NotInitialized("You have to specify the seed_state")
+            raise utils.NotInitialized("You have to specify the seed_state")
 
         self._initialize_populations(susceptible)
 
@@ -233,7 +236,7 @@ class MetaEpiModel:
             self.compartments_ = self._run_travel(self.compartments_, self.travel_graph)
 
     def integrate(self, **kwargs):
-        raise NotImplementedError(
+        raise utils.NotImplementedError(
             "MetaEpiModel doesn't support direct integration of the ODE"
         )
 
