@@ -9,6 +9,8 @@ import string
 import time
 import os
 import re
+from urllib.parse import urlparse
+from urllib.request import urlretrieve
 
 import networkx as nx
 import numpy as np
@@ -21,7 +23,7 @@ import yaml
 
 from typing import Union
 
-from .utils import *
+from . import utils
 
 
 class EpiModel(object):
@@ -325,7 +327,7 @@ class EpiModel(object):
                 ax = plt.gca()
 
             for comp in self.values_.columns:
-                (self.values_[comp] / N).plot(c=epi_colors[comp[0]], **kwargs)
+                (self.values_[comp] / N).plot(c=utils.EPI_COLORS[comp[0]], **kwargs)
 
             ax.legend(self.values_.columns)
             ax.set_xlabel("Time")
@@ -340,7 +342,7 @@ class EpiModel(object):
             return ax
         except Exception as e:
             print(e)
-            raise NotInitialized("You must call integrate() or simulate() first")
+            raise utils.NotInitialized("You must call integrate() or simulate() first")
 
     def __getattr__(self, name: str) -> pd.Series:
         """
@@ -670,7 +672,7 @@ class EpiModel(object):
                 orig_pos = pos[node[3:]]
                 pos[node] = [orig_pos[0], orig_pos[1] - 1]
             else:
-                node_colors.append(epi_colors[node[0]])
+                node_colors.append(utils.EPI_COLORS[node[0]])
 
         edge_labels = {}
 
@@ -821,3 +823,27 @@ class EpiModel(object):
                 model.name = data[key]
 
         return model
+
+
+    def download_model(filename: str, repo: Union[str, None] = None) -> None:
+        """
+        Download model from offical repository
+        """
+        if repo is None:
+            repo = utils.OFFICIAL_REPO
+
+        parsed_repo = urlparse(repo)
+
+        if parsed_repo.netloc == 'github.com':
+            repo = repo.replace('github.com', 'raw.githubusercontent.com')
+            remote_path = repo + os.path.join('refs/heads/models/models/', filename)
+
+        if not os.path.exists(utils.LOCAL_DIRECTORY):
+            os.makedirs(utils.LOCAL_DIRECTORY)
+
+        local_path = os.path.join(utils.LOCAL_DIRECTORY, filename)
+
+        if not os.path.exists(local_path):
+            urlretrieve(remote_path, local_path)
+
+        return EpiModel.load_model(local_path)

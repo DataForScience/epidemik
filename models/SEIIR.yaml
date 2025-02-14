@@ -1,0 +1,20 @@
+# Epidemic Model with 5 compartments and 6 transitions:
+Name: SEIIR
+
+Parameters:
+  rate : 0.166667
+  beta : 0.222222
+  epsilon_a : 0.160000
+  epsilon_s : 0.240000
+  mu : 0.100000
+
+
+Transitions:
+  - S + Ia = E rate
+  - S + Is = E beta
+  - E -> Ia epsilon_a
+  - E -> Is epsilon_s
+  - Ia -> R mu
+  - Is -> R mu
+
+# R0=2.00

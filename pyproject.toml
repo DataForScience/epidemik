@@ -21,6 +21,7 @@ dependencies = [
  "scipy>=1.7",
  "tqdm>=4",
  "pyyaml (>=6.0.2,<7.0.0)",
+ "seaborn (>=0.13.2,<0.14.0)",
 ]
 [project.urls]
 Homepage = "https://github.com/DataForScience/epidemik"
