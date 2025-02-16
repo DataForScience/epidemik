@@ -62,7 +62,32 @@ class EpiModel(object):
         if compartments is not None:
             self.transitions.add_nodes_from([comp for comp in compartments])
 
-    def add_interaction(self, source: str, target: str, agent: str, **rates) -> None:
+    def _compute_rate(self, rate: Union[str, float]) -> float:
+        """
+        Compute the rate from a string
+
+        Parameters:
+        - rate: string
+            Rate of the transition
+
+        Returns:
+        float
+            The computed rate
+        """
+        if rate in self.params:
+            if isinstance(self.params[rate], float):
+                return self.params[rate]
+            else:
+                return eval(self.params[rate], {}, self.params)
+
+    def add_interaction(
+        self,
+        source: str,
+        target: str,
+        agent: str,
+        rate: Union[None, float, str] = None,
+        **rates,
+    ) -> None:
         """
         Add an interaction between two compartments
 
@@ -80,12 +105,20 @@ class EpiModel(object):
         None
         """
 
-        self.params.update(rates)
-        rates = list(rates.keys())
+        if rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+            self.define_parameters(rate_key=rate)
+        else:
+            self.define_parameters(**rates)
+            rates = list(rates.keys())
+            rate_key = rates[0]
 
-        self.transitions.add_edge(source, target, agent=agent, rate=rates[0])
+        self.transitions.add_edge(source, target, agent=agent, rate=rate_key)
 
-    def add_spontaneous(self, source: str, target: str, **rates) -> None:
+    def add_spontaneous(
+        self, source: str, target: str, rate: Union[None, float, str] = None, **rates
+    ) -> None:
         """
         Add a spontaneous transition between two compartments
 
@@ -101,12 +134,56 @@ class EpiModel(object):
         None
         """
 
-        self.params.update(rates)
-        rates = list(rates.keys())
+        if rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+            self.define_parameters(rate_key=rate)
+        else:
+            self.define_parameters(**rates)
+            rates = list(rates.keys())
+            rate_key = rates[0]
 
-        self.transitions.add_edge(source, target, rate=rates[0])
+        self.transitions.add_edge(source, target, rate=rate_key)
 
-    def add_birth_rate(self, rate: float, comps: Union[List, None] = None) -> None:
+    def add_viral_generation(self, 
+                             source:str, 
+                             target:str, 
+                             source_rate:Union[float, str,  None] = None, 
+                             target_rate:Union[float, str, None] = None,
+                             **rates
+        ) -> None:
+        """
+        Add a viral generation transition
+
+        Parameters:
+        - source: string
+            Name of the source compartment
+        - target: string
+            Name of the target compartment
+        - source_rate: float
+            Rate of destruction of infected cells
+        - target_rate: float
+            Rate of creation of viral particles
+        """
+
+        if source_rate is not None and target_rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+            self.define_parameters(rate_key = source_rate)
+
+            rate_key = "rate" + str(count+1)
+            self.define_parameters(**{rate_key: target_rate})
+        else: 
+            self.define_parameters(**rates)
+            rates = list(rates.keys())
+            source_rate = rates[0]
+            target_rate = rates[1]
+
+        self.transitions.add_edge(source, target, source_rate=source_rate, target_rate=target_rate)
+
+    def add_birth_rate(
+        self, comps: Union[List, None] = None, rate: Union[float, None] = None, **rates
+    ) -> None:
         """
         Add a birth rate to one or more compartments
 
@@ -119,13 +196,26 @@ class EpiModel(object):
         """
         self.demographics = True
 
+        if rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+            self.params[rate_key] = rate
+        else:
+            self.params.update(rates)
+            rate_key = list(rates.keys())[0]
+
         if comps is None:
             comps = self.transitions.nodes()
 
         for comp in comps:
-            self.transitions.nodes[comp]["birth"] = rate
+            if comp not in self.transitions.nodes:
+                self.transitions.add_node(comp)
 
-    def add_death_rate(self, rate: float, comps: Union[List, None] = None) -> None:
+            self.transitions.nodes[comp]["birth"] = rate_key
+
+    def add_death_rate(
+        self, comps: Union[List, None] = None, rate: Union[None, float] = None, **rates
+    ) -> None:
         """
         Add a birth rate to one or more compartments
 
@@ -138,14 +228,25 @@ class EpiModel(object):
         """
         self.demographics = True
 
+        if rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+            self.params[rate_key] = rate
+        else:
+            self.params.update(rates)
+            rate_key = list(rates.keys())[0]
+
         if comps is None:
             comps = self.transitions.nodes()
 
         for comp in comps:
-            self.transitions.nodes[comp]["death"] = rate
+            if comp not in self.transitions.nodes:
+                self.transitions.add_node(comp)
+
+            self.transitions.nodes[comp]["death"] = rate_key
 
     def add_vaccination(
-        self, source: str, target: str, rate: float, start: int
+        self, source: str, target: str, start: int, rate: Union[None, float, str], **rates
     ) -> None:
         """
         Add a vaccination transition between two compartments
@@ -163,7 +264,37 @@ class EpiModel(object):
         Returns:
         None
         """
-        self.transitions.add_edge(source, target, rate=rate, start=start)
+
+        if rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+            self.params[rate_key] = rate
+        else:
+            self.params.update(rates)
+            rate_key = list(rates.keys())[0]
+
+        self.transitions.add_edge(source, target, rate=rate_key, start=start)
+
+    def define_parameters(self, **kwargs) -> None:
+        """
+        Define one or more parameter for the model
+
+        Parameters:
+        - kwargs: keyword arguments
+            Named parameters for the model
+
+        Returns:
+        None
+        """
+        for key, value in kwargs.items():
+            if isinstance(value, str):
+                try:
+                    # Convert floats written as strings to float
+                    value = float(value.strip())
+                except:
+                    pass
+
+            self.params[key] = value
 
     def add_age_structure(self, matrix: List, population: List) -> List[List]:
         """
@@ -253,7 +384,7 @@ class EpiModel(object):
             target = edge[1]
             trans = edge[2]
 
-            rate_val = self.params[trans["rate"]]
+            rate_val = self._compute_rate(trans["rate"]) #self.params[trans["rate"]]
             rate = rate_val * population[pos[source]]
 
             if "start" in trans and trans["start"] >= time:
@@ -412,7 +543,7 @@ class EpiModel(object):
                     source = pos[comp]
                     target = pos[node_j]
 
-                    rate = self.params[data["rate"]]
+                    rate = self._compute_rate(data["rate"]) # self.params[data["rate"]]
 
                     if "start" in data and data["start"] >= t:
                         continue
@@ -449,11 +580,11 @@ class EpiModel(object):
                     comp_id = pos[comp]
 
                     if "birth" in data:
-                        births = self.rng.binomial(pop[comp_id], data["birth"])
+                        births = self.rng.binomial(pop[comp_id], self._compute_rate(data["birth"]))
                         new_pop[comp_id] += births
 
                     if "death" in data:
-                        deaths = self.rng.binomial(pop[comp_id], data["death"])
+                        deaths = self.rng.binomial(pop[comp_id], self._compute_rate(data["death"]))
                         new_pop[comp_id] -= deaths
 
             values.append(new_pop)
@@ -561,7 +692,7 @@ class EpiModel(object):
 
         text += "Parameters:\n"
         for rate, value in self.params.items():
-            text += "  %s : %f\n" % (rate, value)
+            text += "  %s : %s\n" % (rate, value)
         text += "\n\nTransitions:\n"
 
         for edge in self.transitions.edges(data=True):
@@ -569,9 +700,11 @@ class EpiModel(object):
             target = edge[1]
             trans = edge[2]
 
+            # Interaction
             if "agent" in trans:
                 agent = trans["agent"]
                 text += "  - %s + %s = %s %s\n" % (source, agent, target, trans["rate"])
+            # Vaccination
             elif "start" in trans:
                 start = trans["start"]
                 text += "  - %s -> %s %s starting at %s days\n" % (
@@ -580,8 +713,25 @@ class EpiModel(object):
                     rate,
                     start,
                 )
+            # Viral transition
+            elif "source_rate" in trans:
+                text += "  - %s => %s %s %s" % (
+                    source,
+                    target,
+                    trans["source_rate"],
+                    trans["target_rate"],
+                )
+            # Spontaneous
             else:
                 text += "  - %s -> %s %s\n" % (source, target, rate)
+
+        if self.demographics:
+            text += "\n\nDemographics:\n"
+            for comp, data in self.transitions.nodes(data=True):
+                if "birth" in data:
+                    text += "  - -> %s: %s # birth rate\n" % (comp, data["birth"])
+                if "death" in data:
+                    text += "  - %s ->: %s # death rate\n" % (comp, data["death"])
 
         R0 = self.R0()
 
@@ -736,7 +886,7 @@ class EpiModel(object):
 
         try:
             for node_i, node_j, data in self.transitions.edges(data=True):
-                rate = self.params[data["rate"]]
+                rate = self._compute_rate(data["rate"]) # self.params[data["rate"]]
 
                 if "agent" in data:
                     target = pos[node_j]
