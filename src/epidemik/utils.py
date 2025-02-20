@@ -10,6 +10,7 @@ __all__ = [
     "NotInitialized",
     "get_cache_directory",
     "NotImplementedError",
+    "Parameters",
 ]
 
 
@@ -31,6 +32,62 @@ EPI_COLORS["I"] = "#cf51f9"
 EPI_COLORS["R"] = "#70bf41"
 EPI_COLORS["D"] = "#8b8b8b"
 
+
+class Parameters(dict):
+    def __init__(self):
+        super().__init__()
+        self.globals = {"__builtins__": None}
+
+    def __setitem__(self, key, value):
+        self.define_parameters(**{key: value})
+
+    def __getitem__(self, key):
+        return self.compute_parameter(key)
+
+    def define_parameters(self, **kwargs) -> None:
+        """
+        Define one or more parameter for the model
+
+        Parameters:
+        - kwargs: keyword arguments
+            Named parameters for the model
+
+        Returns:
+        None
+        """
+        for key, value in kwargs.items():
+            if isinstance(value, str):
+                try:
+                    # Convert floats written as strings to float
+                    value = float(value.strip())
+                except:
+                    pass
+            
+            super().__setitem__(key, value)
+
+    def compute_parameter(self, param: Union[str]) -> float:
+        """
+        Compute the rate from a string
+
+        Parameters:
+        - rate: string
+            Rate of the transition
+
+        Returns:
+        float
+            The computed rate
+        """
+        import logging
+
+        if param in self.keys():
+            if isinstance(super().__getitem__(param), (int, float)):
+                return super().__getitem__(param)
+            else:
+                try:
+                    return eval(super().__getitem__(param), self.globals, self)
+                except Exception as e:
+                    logging.error(f"Error computing parameter {param}: {e}")
+                    return None
 
 def get_cache_directory():
     """
