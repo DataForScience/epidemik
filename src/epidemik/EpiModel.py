@@ -67,6 +67,7 @@ class EpiModel(object):
         target: str,
         agent: str,
         rate: Union[None, float, str] = None,
+        norm=True,
         **rates,
     ) -> None:
         """
@@ -79,7 +80,11 @@ class EpiModel(object):
             Name of the target compartment
         - agent: string
             Name of the agent
-        - params: string
+        - rate: float, str, None
+            Rate of the interaction
+        - norm: bool
+            Whether to normalize the transition rate or not
+        - rates:
             Named parameters for the interaction
 
         Returns:
@@ -95,7 +100,10 @@ class EpiModel(object):
             rates = list(rates.keys())
             rate_key = rates[0]
 
-        self.transitions.add_edge(source, target, agent=agent, rate=rate_key)
+        if agent not in self.transitions.nodes:
+            self.transitions.add_node(agent)
+    
+        self.transitions.add_edge(source, target, agent=agent, rate=rate_key, norm=norm)
 
     def add_spontaneous(
         self, source: str, target: str, rate: Union[None, float, str] = None, **rates
@@ -162,14 +170,19 @@ class EpiModel(object):
             target_rate = rates[1]
 
         self.transitions.add_edge(
-            source, target, rate=source_rate
+            source, target, rate=source_rate, viral_source=True, viral_target=False,
         )
         self.transitions.add_edge(
-            source, target, rate=target_rate
+            source, target, rate=target_rate, viral_source=False, viral_target=True
         )
 
     def add_birth_rate(
-        self, comps: Union[List, None] = None, rate: Union[float, None] = None, fixed=False, **rates
+        self, 
+        comps: Union[List, None] = None, 
+        rate: Union[float, None] = None, 
+        fixed=False, 
+        global_rate=True,
+        **rates
     ) -> None:
         """
         Add a birth rate to one or more compartments
@@ -200,9 +213,13 @@ class EpiModel(object):
 
             self.transitions.nodes[comp]["birth"] = rate_key
             self.transitions.nodes[comp]["fixed"] = fixed
+            self.transitions.nodes[comp]["global"] = global_rate
 
     def add_death_rate(
-        self, comps: Union[List, None] = None, rate: Union[None, float] = None, **rates
+        self, 
+        comps: Union[List, None] = None, 
+        rate: Union[None, float] = None, 
+        **rates
     ) -> None:
         """
         Add a birth rate to one or more compartments
@@ -327,10 +344,10 @@ class EpiModel(object):
         Internal function used by integration routine
 
         Parameters:
-        - population: numpy array
-            Current population of each compartment
         - time: float
             Current time
+        - population: numpy array
+            Current population of each compartment
         - pos: dict
             Dictionary mapping compartment names to indices
 
@@ -364,36 +381,45 @@ class EpiModel(object):
 
             if "agent" in trans:
                 agent = trans["agent"]
+                rate *= population[pos[agent]]
 
-                if self.population is None:
-                    rate *= population[pos[agent]] / N
-                else:
-                    rate *= population[pos[agent]] / N[agent]
-
+                if trans["norm"]:
+                    if self.population is None:
+                        rate /=  N
+                    else:
+                        rate /= N[agent]
+                
                 if self.seasonality is not None:
                     curr_t = int(time) % 365
                     season = float(self.seasonality[curr_t])
                     rate *= season
 
-            diff[pos[source]] -= rate
-            diff[pos[target]] += rate
+            if "viral_source" not in trans or trans["viral_source"]:
+                diff[pos[source]] -= rate
+            # Make sure viral generations are asymetric
+            if "viral_target" not in trans or trans["viral_target"]:
+                diff[pos[target]] += rate
 
-            # Population dynamics
-            if self.demographics:
-                for comp, data in self.transitions.nodes(data=True):
-                    comp_id = pos[comp]
+        # Population dynamics
+        if self.demographics:
+            for comp, data in self.transitions.nodes(data=True):
+                comp_id = pos[comp]
 
-                    if "birth" in data:
-                        if "fixed" in data:
-                            births = self.params[data["birth"]]
+                if "birth" in data:
+                    if "fixed" in data and data["fixed"]:
+                        births = self.params[data["birth"]]
+                    else:
+                        if data["global"]:
+                            total_population = population.sum()
+                            births = total_population * self.params[data["birth"]]
                         else:
                             births = population[comp_id] * self.params[data["birth"]]
-    
-                        diff[comp_id] += births
 
-                    if "death" in data:
-                        deaths = population[comp_id] * self.params[data["death"]]
-                        diff[comp_id] -= deaths
+                    diff[comp_id] += births
+
+                if "death" in data:
+                    deaths = population[comp_id] * self.params[data["death"]]
+                    diff[comp_id] -= deaths
 
         return diff
 
@@ -616,7 +642,7 @@ class EpiModel(object):
 
                     population[pos[comp_age]] = n[i]
 
-        time = np.arange(t_min, t_min + timesteps, 1)
+        time = np.arange(t_min, t_min + timesteps)
 
         self.seasonality = seasonality
         values = pd.DataFrame(

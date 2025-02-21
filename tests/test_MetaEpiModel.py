@@ -46,3 +46,5 @@ class MetaEpiModelTestCase(unittest.TestCase):
     def test_integrate(self):
         with self.assertRaises(NotImplementedError) as _:
             self.SIR.integrate()
+
+
