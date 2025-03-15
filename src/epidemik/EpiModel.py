@@ -180,8 +180,8 @@ class EpiModel(object):
         self, 
         comps: Union[List, None] = None, 
         rate: Union[float, None] = None, 
-        fixed=False, 
-        global_rate=True,
+        fixed: bool = False, 
+        global_rate: bool = True,
         **rates
     ) -> None:
         """
@@ -212,13 +212,15 @@ class EpiModel(object):
                 self.transitions.add_node(comp)
 
             self.transitions.nodes[comp]["birth"] = rate_key
-            self.transitions.nodes[comp]["fixed"] = fixed
-            self.transitions.nodes[comp]["global"] = global_rate
+            self.transitions.nodes[comp]["fixed_birth"] = fixed
+            self.transitions.nodes[comp]["global_birth"] = global_rate
 
     def add_death_rate(
         self, 
         comps: Union[List, None] = None, 
         rate: Union[None, float] = None, 
+        fixed: bool = False,
+        global_rate: bool = False,
         **rates
     ) -> None:
         """
@@ -249,6 +251,8 @@ class EpiModel(object):
                 self.transitions.add_node(comp)
 
             self.transitions.nodes[comp]["death"] = rate_key
+            self.transitions.nodes[comp]["fixed_death"] = fixed
+            self.transitions.nodes[comp]["global_death"] = global_rate
 
     def add_vaccination(
         self,
@@ -406,10 +410,10 @@ class EpiModel(object):
                 comp_id = pos[comp]
 
                 if "birth" in data:
-                    if "fixed" in data and data["fixed"]:
+                    if "fixed_birth" in data and data["fixed_birth"]:
                         births = self.params[data["birth"]]
                     else:
-                        if data["global"]:
+                        if data["global_birth"]:
                             total_population = population.sum()
                             births = total_population * self.params[data["birth"]]
                         else:
@@ -418,8 +422,17 @@ class EpiModel(object):
                     diff[comp_id] += births
 
                 if "death" in data:
-                    deaths = population[comp_id] * self.params[data["death"]]
+                    if "fixed_death" in data and data["fixed_death"]:
+                        deaths = self.params[data["death"]]
+                    else:
+                        if data["global_death"]:
+                            total_population = population.sum()
+                            deaths = total_population * self.params[data["death"]]
+                        else:
+                            deaths = population[comp_id] * self.params[data["death"]]
+
                     diff[comp_id] -= deaths
+
 
         return diff
 
