@@ -30,15 +30,17 @@ class EpiModel(object):
 
     def __init__(self, compartments=None, seed=None, rng=None):
         """
-        Initialize the EpiModel object
-
-        Parameters:
-        - compartments: list of strings, optional
-            List of compartment names
-
-        Returns:
-        None
+        Initialize the EpiModel object.
+        
+        :param compartments: List of compartment names
+        :type compartments: list[str], optional
+        :param seed: Seed for the random number generator. If None, it is computed using the current time and process ID
+        :type seed: int, optional
+        :param rng: Instance of a random number generator
+        :type rng: numpy.random.Generator, optional
+        :return: None
         """
+        
         self.name = None
         self.transitions = nx.MultiDiGraph()
         self.seasonality = None
@@ -60,20 +62,20 @@ class EpiModel(object):
 
     def add_interaction(self, source: str, target: str, agent: str, **rates) -> None:
         """
-        Add an interaction between two compartments
-
-        Parameters:
-        - source: string
-            Name of the source compartment
-        - target: string
-            Name of the target compartment
-        - agent: string
-            Name of the agent
-        - params: string
-            Named parameters for the interaction
-
-        Returns:
-        None
+        Add an interaction between two compartments.
+        
+        This method adds a directed edge from the source compartment to the target compartment in the transition graph,
+        with the specified agent and rate. The rates are passed as keyword arguments and will be added to the model's parameters.
+        
+        :param source: Name of the source compartment
+        :type source: str
+        :param target: Name of the target compartment
+        :type target: str
+        :param agent: Name of the agent
+        :type agent: str
+        :param rates: Named parameters representing the interaction rates
+        :type rates: dict
+        :return: None
         """
 
         self.params.update(rates)
@@ -83,18 +85,15 @@ class EpiModel(object):
 
     def add_spontaneous(self, source: str, target: str, **rates) -> None:
         """
-        Add a spontaneous transition between two compartments
-
-        Parameters:
-        - source: string
-            Name of the source compartment
-        - target: string
-            Name of the target compartment
-        - rate: float
-            Rate of the transition
-
-        Returns:
-        None
+        Add a spontaneous transition between two compartments.
+        
+        :param source: Name of the source compartment
+        :type source: str
+        :param target: Name of the target compartment
+        :type target: str
+        :param rates: Named parameters representing the transition rates
+        :type rates: dict
+        :return: None
         """
 
         self.params.update(rates)
@@ -104,15 +103,13 @@ class EpiModel(object):
 
     def add_birth_rate(self, rate: float, comps: Union[List, None] = None) -> None:
         """
-        Add a birth rate to one or more compartments
-
-        Parameters:
-        - rate: float
-            Birth rate
-        - comps: list, optional, default=None
-            List of compartments to which to assign this birth rate.
-            If None, apply to all compartments
-
+        Add a birth rate to one or more compartments.
+        
+        :param rate: Birth rate
+        :type rate: float
+        :param comps: List of compartments to which to assign this birth rate. If None, apply to all compartments
+        :type comps: list[str], optional
+        :return: None
         """
         self.demographics = True
 
@@ -124,14 +121,13 @@ class EpiModel(object):
 
     def add_death_rate(self, rate: float, comps: Union[List, None] = None) -> None:
         """
-        Add a birth rate to one or more compartments
-
-        Parameters:
-        - rate: float
-            Death rate
-        - comps: list, optional, default=None
-            List of compartments to which to assign this death rate.
-            If None, apply to all compartments
+        Add a death rate to one or more compartments.
+        
+        :param rate: Death rate
+        :type rate: float
+        :param comps: List of compartments to which to assign this death rate. If None, apply to all compartments
+        :type comps: list[str], optional
+        :return: None
         """
         self.demographics = True
 
@@ -145,30 +141,30 @@ class EpiModel(object):
         self, source: str, target: str, rate: float, start: int
     ) -> None:
         """
-        Add a vaccination transition between two compartments
-
-        Parameters:
-        - source: string
-            Name of the source compartment
-        - target: string
-            Name of the target compartment
-        - rate: float
-            Rate of the vaccination
-        - start: int
-            Start time of the vaccination
-
-        Returns:
-        None
+        Add a vaccination transition between two compartments.
+        
+        :param source: Name of the source compartment
+        :type source: str
+        :param target: Name of the target compartment
+        :type target: str
+        :param rate: Rate of the vaccination
+        :type rate: float
+        :param start: Start time of the vaccination
+        :type start: int
+        :return: None
         """
         self.transitions.add_edge(source, target, rate=rate, start=start)
 
     def add_age_structure(self, matrix: List, population: List) -> List[List]:
         """
-        Add a vaccination transition between two compartments
-
-        Parameters:
-        - matrix: List
-        - population: List
+        Add age structure to the model using a contact matrix.
+        
+        :param matrix: Contact matrix between age groups
+        :type matrix: list[list[float]]
+        :param population: Population size for each age group
+        :type population: list[int]
+        :return: The modified model structure
+        :rtype: list[list]
         """
         self.contact = np.asarray(matrix)
         self.population = np.asarray(population).flatten()
@@ -218,19 +214,16 @@ class EpiModel(object):
 
     def _new_cases(self, time: float, population: np.ndarray, pos: Dict) -> np.ndarray:
         """
-        Internal function used by integration routine
-
-        Parameters:
-        - population: numpy array
-            Current population of each compartment
-        - time: float
-            Current time
-        - pos: dict
-            Dictionary mapping compartment names to indices
-
-        Returns:
-        numpy array
-            Array of new cases for each compartment
+        Internal function used by integration routine.
+        
+        :param time: Current simulation time
+        :type time: float
+        :param population: Current population of each compartment
+        :type population: numpy.ndarray
+        :param pos: Dictionary mapping compartment names to indices
+        :type pos: dict
+        :return: Array of new cases for each compartment
+        :rtype: numpy.ndarray
         """
         diff = np.zeros(len(pos))
         N = np.sum(population)
@@ -296,23 +289,20 @@ class EpiModel(object):
         **kwargs,
     ):
         """
-        Convenience function for plotting
-
-        Parameters:
-        - title: string, optional, default=None
-            Title of the plot
-        - normed: bool, default=True
-            Whether to normalize the values or not
-        - ax: matplotlib Axes object, default=None
-            The Axes object to plot to. If None, a new figure is created.
-        - show: bool, default=True
-            Whether to call plt.show() or not
-        - kwargs: keyword arguments
-            Additional arguments to pass to the plot function
-
-        Returns:
-        matplotlib.axes._subplots.AxesSubplot
-            The plot object
+        Convenience function for plotting model results.
+        
+        :param title: Title of the plot
+        :type title: str, optional
+        :param normed: Whether to normalize the values or not
+        :type normed: bool, default=True
+        :param show: Whether to call plt.show() or not
+        :type show: bool, default=True
+        :param ax: The Axes object to plot to. If None, a new figure is created
+        :type ax: matplotlib.axes._subplots.AxesSubplot, optional
+        :param kwargs: Additional arguments to pass to the plot function
+        :type kwargs: dict
+        :return: The plot object
+        :rtype: matplotlib.axes._subplots.AxesSubplot
         """
         try:
             if normed:
@@ -343,15 +333,13 @@ class EpiModel(object):
 
     def __getattr__(self, name: str) -> pd.Series:
         """
-        Dynamic method to return the individual compartment values
-
-        Parameters:
-        - name: string
-            Name of the compartment
-
-        Returns:
-        pandas.Series
-            The values of the specified compartment
+        Dynamic method to return the individual compartment values.
+        
+        :param name: Name of the compartment
+        :type name: str
+        :return: The values of the specified compartment
+        :rtype: pandas.Series
+        :raises AttributeError: If the model hasn't been integrated or simulated yet
         """
         if "values_" in self.__dict__:
             return self.values_[name]
@@ -366,20 +354,17 @@ class EpiModel(object):
         **kwargs,
     ) -> None:
         """
-        Stochastically simulate the epidemic model
-
-        Parameters:
-        - timesteps: int
-            Number of time steps to simulate
-        - t_min: int, optional
-            Starting time
-        - seasonality: numpy array, optional
-            Array of seasonal factors
-        - kwargs: keyword arguments
-            Initial population of each compartment
-
-        Returns:
-        None
+        Stochastically simulate the epidemic model.
+        
+        :param timesteps: Number of time steps to simulate
+        :type timesteps: int
+        :param t_min: Starting time
+        :type t_min: int, default=1
+        :param seasonality: Array of seasonal factors
+        :type seasonality: numpy.ndarray, optional
+        :param kwargs: Initial population of each compartment
+        :type kwargs: dict
+        :return: None
         """
         pos = {comp: i for i, comp in enumerate(self.transitions.nodes())}
         population = np.zeros(len(pos), dtype="int")
@@ -466,20 +451,17 @@ class EpiModel(object):
         **kwargs,
     ) -> None:
         """
-        Numerically integrate the epidemic model
-
-        Parameters:
-        - timesteps: int
-            Number of time steps to integrate
-        - t_min: int, optional
-            Starting time
-        - seasonality: numpy array, optional
-            Array of seasonality values
-        - kwargs: keyword arguments
-            Initial population of each compartment
-
-        Returns:
-        None
+        Numerically integrate the epidemic model.
+        
+        :param timesteps: Number of time steps to integrate
+        :type timesteps: int
+        :param t_min: Starting time
+        :type t_min: int, default=1
+        :param seasonality: Array of seasonality values
+        :type seasonality: numpy.ndarray, optional
+        :param kwargs: Initial population of each compartment
+        :type kwargs: dict
+        :return: None
         """
         pos = {comp: i for i, comp in enumerate(self.transitions.nodes())}
         population = np.zeros(len(pos))
@@ -530,6 +512,15 @@ class EpiModel(object):
             self.values_ = totals[self.orig_comps].copy()
 
     def single_step(self, seasonality=None, **kwargs):
+        """
+        Perform a single simulation step.
+        
+        :param seasonality: Array of seasonality values
+        :type seasonality: numpy.ndarray, optional
+        :param kwargs: Initial population of each compartment if simulation hasn't started
+        :type kwargs: dict
+        :return: None
+        """
         if hasattr(self, "values_") is False:
             self.simulate(2, 1, seasonality=seasonality, **kwargs)
         else:
@@ -541,11 +532,10 @@ class EpiModel(object):
 
     def __repr__(self) -> str:
         """
-        Return a string representation of the EpiModel object
-
-        Returns:
-        string
-            String representation of the EpiModel object
+        Return a string representation of the EpiModel object.
+        
+        :return: String representation of the EpiModel object
+        :rtype: str
         """
         text = "# Epidemic Model with %u compartments and %u transitions:" % (
             self.transitions.number_of_nodes(),
@@ -588,6 +578,12 @@ class EpiModel(object):
         return text
 
     def _get_active(self) -> Set:
+        """
+        Get the set of active compartments or agents in the model.
+        
+        :return: Set of active compartments or agents
+        :rtype: set
+        """
         active = set()
 
         for node_i, node_j, data in self.transitions.edges(data=True):
@@ -599,6 +595,12 @@ class EpiModel(object):
         return active
 
     def _get_susceptible(self) -> Set:
+        """
+        Get the set of susceptible compartments in the model.
+        
+        :return: Set of susceptible compartments
+        :rtype: set
+        """
         susceptible = set(
             [node for node, deg in self.transitions.in_degree() if deg == 0]
         )
@@ -611,6 +613,12 @@ class EpiModel(object):
         return susceptible
 
     def _get_infections(self) -> Dict:
+        """
+        Get the dictionary of infection transitions in the model.
+        
+        :return: Dictionary of infection transitions
+        :rtype: dict
+        """
         inf = {}
 
         for node_i, node_j, data in self.transitions.edges(data=True):
@@ -630,12 +638,13 @@ class EpiModel(object):
 
     def draw_model(self, ax: Union[plt.Axes, None] = None, show: bool = True) -> None:
         """
-        Plot the model structure
-
-        - ax: matplotlib Axes object, default=None
-            The Axes object to plot to. If None, a new figure is created.
-        - show: bool, default=True
-            Whether to call plt.show() or not
+        Plot the model structure.
+        
+        :param ax: The Axes object to plot to. If None, a new figure is created
+        :type ax: matplotlib.axes._subplots.AxesSubplot, optional
+        :param show: Whether to call plt.show() or not
+        :type show: bool, default=True
+        :return: None
         """
 
         trans = self.transitions.copy()
@@ -705,13 +714,12 @@ class EpiModel(object):
 
     def R0(self) -> Union[float, None]:
         """
-        Return the value of the basic reproductive ratio, $R_0$, for the model as defined
-
-        The calculation is completely generic as it uses the Next-Generation matrix approach
-        defined in J. R. Soc Interface 7, 873 (2010)
-
-        Returns:
-        R0 - the value of the largest eigenvalue of the next generation matrix
+        Calculate the basic reproductive ratio (R0) for the model.
+        
+        Uses the Next-Generation matrix approach defined in J. R. Soc Interface 7, 873 (2010).
+        
+        :return: The value of the largest eigenvalue of the next generation matrix, or None if calculation fails
+        :rtype: float or None
         """
 
         infected = set()
@@ -760,6 +768,14 @@ class EpiModel(object):
             return None
 
     def __getitem__(self, key):
+        """
+        Allow indexing the model with compartment names to get their values.
+        
+        :param key: Compartment name or list of compartment names
+        :type key: str or list[str]
+        :return: The values for the specified compartment(s)
+        :rtype: pandas.Series or pandas.DataFrame or None
+        """
         if type(key) != type([]):
             key_check = set([key])
         else:
@@ -774,28 +790,23 @@ class EpiModel(object):
 
     def save_model(self, filename: str) -> None:
         """
-        Save the model to a file
-
-        Parameters:
-        - filename: string
-            Name of the file to save the model to
-
-        Returns:
-        None
+        Save the model to a file.
+        
+        :param filename: Name of the file to save the model to
+        :type filename: str
+        :return: None
         """
         with open(filename, "wt") as f:
             f.write(self.__repr__())
 
     def load_model(filename: str) -> None:
         """
-        Load the model from a file
-
-        Parameters:
-        - filename: string
-            Name of the file to load the model from
-
-        Returns:
-        None
+        Load a model from a file.
+        
+        :param filename: Name of the file to load the model from
+        :type filename: str
+        :return: The loaded model
+        :rtype: EpiModel
         """
         data = yaml.load(open(filename, "rt"), Loader=yaml.FullLoader)
         model = EpiModel()
