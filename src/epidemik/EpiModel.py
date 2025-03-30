@@ -3,23 +3,26 @@
 # @author Bruno Goncalves
 ######################################################
 
-from typing import Dict, List, Set, Union
+from typing import Dict, List, Set, Union, Self
 import warnings
 import string
 import time
 import os
 import re
+from urllib.parse import urlparse
+from urllib.request import urlretrieve
 
 import networkx as nx
 import numpy as np
 from numpy import linalg
-from numpy import random
 import scipy.integrate
 import pandas as pd
 import matplotlib.pyplot as plt
 import yaml
 
-from .utils import *
+from typing import Union
+
+from . import utils
 
 
 class EpiModel(object):
@@ -47,7 +50,7 @@ class EpiModel(object):
         self.population = None
         self.orig_comps = None
         self.demographics = False
-        self.params = {}
+        self.params = utils.Parameters()
 
         if seed is None:
             seed = int(time.time()) + os.getpid()
@@ -60,8 +63,17 @@ class EpiModel(object):
         if compartments is not None:
             self.transitions.add_nodes_from([comp for comp in compartments])
 
-    def add_interaction(self, source: str, target: str, agent: str, **rates) -> None:
+    def add_interaction(
+        self,
+        source: str,
+        target: str,
+        agent: str,
+        rate: Union[None, float, str] = None,
+        norm=True,
+        **rates,
+    ) -> None:
         """
+<<<<<<< HEAD
         Add an interaction between two compartments.
         
         This method adds a directed edge from the source compartment to the target compartment in the transition graph,
@@ -76,14 +88,45 @@ class EpiModel(object):
         :param rates: Named parameters representing the interaction rates
         :type rates: dict
         :return: None
+=======
+        Add an interaction between two compartments
+
+        Parameters:
+        - source: string
+            Name of the source compartment
+        - target: string
+            Name of the target compartment
+        - agent: string
+            Name of the agent
+        - rate: float, str, None
+            Rate of the interaction
+        - norm: bool
+            Whether to normalize the transition rate or not
+        - rates:
+            Named parameters for the interaction
+
+        Returns:
+        None
+>>>>>>> models
         """
 
-        self.params.update(rates)
-        rates = list(rates.keys())
+        if rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+            self.params[rate_key]=rate
+        else:
+            self.params.define_parameters(**rates)
+            rates = list(rates.keys())
+            rate_key = rates[0]
 
-        self.transitions.add_edge(source, target, agent=agent, rate=rates[0])
+        if agent not in self.transitions.nodes:
+            self.transitions.add_node(agent)
+    
+        self.transitions.add_edge(source, target, agent=agent, rate=rate_key, norm=norm)
 
-    def add_spontaneous(self, source: str, target: str, **rates) -> None:
+    def add_spontaneous(
+        self, source: str, target: str, rate: Union[None, float, str] = None, **rates
+    ) -> None:
         """
         Add a spontaneous transition between two compartments.
         
@@ -96,12 +139,67 @@ class EpiModel(object):
         :return: None
         """
 
-        self.params.update(rates)
-        rates = list(rates.keys())
+        if rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+            self.params[rate_key, rate]
+        else:
+            self.params.define_parameters(**rates)
+            rates = list(rates.keys())
+            rate_key = rates[0]
 
-        self.transitions.add_edge(source, target, rate=rates[0])
+        self.transitions.add_edge(source, target, rate=rate_key)
 
-    def add_birth_rate(self, rate: float, comps: Union[List, None] = None) -> None:
+    def add_viral_generation(
+        self,
+        source: str,
+        target: str,
+        source_rate: Union[float, str, None] = None,
+        target_rate: Union[float, str, None] = None,
+        **rates,
+    ) -> None:
+        """
+        Add a viral generation transition
+
+        Parameters:
+        - source: string
+            Name of the source compartment
+        - target: string
+            Name of the target compartment
+        - source_rate: float
+            Rate of destruction of infected cells
+        - target_rate: float
+            Rate of creation of viral particles
+        """
+
+        if source_rate is not None and target_rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+            self.params[rate_key] = source_rate
+
+            rate_key = "rate" + str(count + 1)
+            self.params[rate_key] = target_rate
+        else:
+            self.params.define_parameters(**rates)
+            rates = list(rates.keys())
+            source_rate = rates[0]
+            target_rate = rates[1]
+
+        self.transitions.add_edge(
+            source, target, rate=source_rate, viral_source=True, viral_target=False,
+        )
+        self.transitions.add_edge(
+            source, target, rate=target_rate, viral_source=False, viral_target=True
+        )
+
+    def add_birth_rate(
+        self, 
+        comps: Union[List, None] = None, 
+        rate: Union[float, None] = None, 
+        fixed: bool = False, 
+        global_rate: bool = True,
+        **rates
+    ) -> None:
         """
         Add a birth rate to one or more compartments.
         
@@ -113,13 +211,33 @@ class EpiModel(object):
         """
         self.demographics = True
 
+        if rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+            self.params[rate_key] = rate
+        else:
+            self.params.update(rates)
+            rate_key = list(rates.keys())[0]
+
         if comps is None:
             comps = self.transitions.nodes()
 
         for comp in comps:
-            self.transitions.nodes[comp]["birth"] = rate
+            if comp not in self.transitions.nodes:
+                self.transitions.add_node(comp)
 
-    def add_death_rate(self, rate: float, comps: Union[List, None] = None) -> None:
+            self.transitions.nodes[comp]["birth"] = rate_key
+            self.transitions.nodes[comp]["fixed_birth"] = fixed
+            self.transitions.nodes[comp]["global_birth"] = global_rate
+
+    def add_death_rate(
+        self, 
+        comps: Union[List, None] = None, 
+        rate: Union[None, float] = None, 
+        fixed: bool = False,
+        global_rate: bool = False,
+        **rates
+    ) -> None:
         """
         Add a death rate to one or more compartments.
         
@@ -131,14 +249,32 @@ class EpiModel(object):
         """
         self.demographics = True
 
+        if rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+            self.params[rate_key] = rate
+        else:
+            self.params.update(rates)
+            rate_key = list(rates.keys())[0]
+
         if comps is None:
             comps = self.transitions.nodes()
 
         for comp in comps:
-            self.transitions.nodes[comp]["death"] = rate
+            if comp not in self.transitions.nodes:
+                self.transitions.add_node(comp)
+
+            self.transitions.nodes[comp]["death"] = rate_key
+            self.transitions.nodes[comp]["fixed_death"] = fixed
+            self.transitions.nodes[comp]["global_death"] = global_rate
 
     def add_vaccination(
-        self, source: str, target: str, rate: float, start: int
+        self,
+        source: str,
+        target: str,
+        start: int,
+        rate: Union[None, float, str],
+        **rates,
     ) -> None:
         """
         Add a vaccination transition between two compartments.
@@ -153,7 +289,16 @@ class EpiModel(object):
         :type start: int
         :return: None
         """
-        self.transitions.add_edge(source, target, rate=rate, start=start)
+
+        if rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+            self.params[rate_key] = rate
+        else:
+            self.params.update(rates)
+            rate_key = list(rates.keys())[0]
+
+        self.transitions.add_edge(source, target, rate=rate_key, start=start)
 
     def add_age_structure(self, matrix: List, population: List) -> List[List]:
         """
@@ -214,6 +359,7 @@ class EpiModel(object):
 
     def _new_cases(self, time: float, population: np.ndarray, pos: Dict) -> np.ndarray:
         """
+<<<<<<< HEAD
         Internal function used by integration routine.
         
         :param time: Current simulation time
@@ -224,6 +370,21 @@ class EpiModel(object):
         :type pos: dict
         :return: Array of new cases for each compartment
         :rtype: numpy.ndarray
+=======
+        Internal function used by integration routine
+
+        Parameters:
+        - time: float
+            Current time
+        - population: numpy array
+            Current population of each compartment
+        - pos: dict
+            Dictionary mapping compartment names to indices
+
+        Returns:
+        numpy array
+            Array of new cases for each compartment
+>>>>>>> models
         """
         diff = np.zeros(len(pos))
         N = np.sum(population)
@@ -251,32 +412,54 @@ class EpiModel(object):
 
             if "agent" in trans:
                 agent = trans["agent"]
+                rate *= population[pos[agent]]
 
-                if self.population is None:
-                    rate *= population[pos[agent]] / N
-                else:
-                    rate *= population[pos[agent]] / N[agent]
-
+                if trans["norm"]:
+                    if self.population is None:
+                        rate /=  N
+                    else:
+                        rate /= N[agent]
+                
                 if self.seasonality is not None:
                     curr_t = int(time) % 365
                     season = float(self.seasonality[curr_t])
                     rate *= season
 
-            diff[pos[source]] -= rate
-            diff[pos[target]] += rate
+            if "viral_source" not in trans or trans["viral_source"]:
+                diff[pos[source]] -= rate
+            # Make sure viral generations are asymetric
+            if "viral_target" not in trans or trans["viral_target"]:
+                diff[pos[target]] += rate
 
-            # Population dynamics
-            if self.demographics:
-                for comp, data in self.transitions.nodes(data=True):
-                    comp_id = pos[comp]
+        # Population dynamics
+        if self.demographics:
+            for comp, data in self.transitions.nodes(data=True):
+                comp_id = pos[comp]
 
-                    if "birth" in data:
-                        births = population[comp_id] * data["birth"]
-                        diff[comp_id] += births
+                if "birth" in data:
+                    if "fixed_birth" in data and data["fixed_birth"]:
+                        births = self.params[data["birth"]]
+                    else:
+                        if data["global_birth"]:
+                            total_population = population.sum()
+                            births = total_population * self.params[data["birth"]]
+                        else:
+                            births = population[comp_id] * self.params[data["birth"]]
 
-                    if "death" in data:
-                        deaths = population[comp_id] * data["death"]
-                        diff[comp_id] -= deaths
+                    diff[comp_id] += births
+
+                if "death" in data:
+                    if "fixed_death" in data and data["fixed_death"]:
+                        deaths = self.params[data["death"]]
+                    else:
+                        if data["global_death"]:
+                            total_population = population.sum()
+                            deaths = total_population * self.params[data["death"]]
+                        else:
+                            deaths = population[comp_id] * self.params[data["death"]]
+
+                    diff[comp_id] -= deaths
+
 
         return diff
 
@@ -314,7 +497,7 @@ class EpiModel(object):
                 ax = plt.gca()
 
             for comp in self.values_.columns:
-                (self.values_[comp] / N).plot(c=epi_colors[comp[0]], **kwargs)
+                (self.values_[comp] / N).plot(c=utils.EPI_COLORS[comp[0]], **kwargs)
 
             ax.legend(self.values_.columns)
             ax.set_xlabel("Time")
@@ -329,7 +512,7 @@ class EpiModel(object):
             return ax
         except Exception as e:
             print(e)
-            raise NotInitialized("You must call integrate() or simulate() first")
+            raise utils.NotInitialized("You must call integrate() or simulate() first")
 
     def __getattr__(self, name: str) -> pd.Series:
         """
@@ -394,7 +577,7 @@ class EpiModel(object):
                     source = pos[comp]
                     target = pos[node_j]
 
-                    rate = self.params[data["rate"]]
+                    rate = self.params[data["rate"]]  # self.params[data["rate"]]
 
                     if "start" in data and data["start"] >= t:
                         continue
@@ -412,7 +595,7 @@ class EpiModel(object):
 
                 prob[source] = 1 - np.sum(prob)
 
-                delta = random.multinomial(pop[source], prob)
+                delta = self.rng.multinomial(pop[source], prob)
                 delta[source] = 0
 
                 changes = np.sum(delta)
@@ -431,11 +614,15 @@ class EpiModel(object):
                     comp_id = pos[comp]
 
                     if "birth" in data:
-                        births = self.rng.binomial(pop[comp_id], data["birth"])
+                        births = self.rng.binomial(
+                            pop[comp_id], self.params[data["birth"]]
+                        )
                         new_pop[comp_id] += births
 
                     if "death" in data:
-                        deaths = self.rng.binomial(pop[comp_id], data["death"])
+                        deaths = self.rng.binomial(
+                            pop[comp_id], self.params[data["death"]]
+                        )
                         new_pop[comp_id] -= deaths
 
             values.append(new_pop)
@@ -484,7 +671,7 @@ class EpiModel(object):
 
                     population[pos[comp_age]] = n[i]
 
-        time = np.arange(t_min, t_min + timesteps, 1)
+        time = np.arange(t_min, t_min + timesteps)
 
         self.seasonality = seasonality
         values = pd.DataFrame(
@@ -548,7 +735,7 @@ class EpiModel(object):
 
         text += "Parameters:\n"
         for rate, value in self.params.items():
-            text += "  %s : %f\n" % (rate, value)
+            text += "  %s : %s\n" % (rate, value)
         text += "\n\nTransitions:\n"
 
         for edge in self.transitions.edges(data=True):
@@ -556,9 +743,11 @@ class EpiModel(object):
             target = edge[1]
             trans = edge[2]
 
+            # Interaction
             if "agent" in trans:
                 agent = trans["agent"]
                 text += "  - %s + %s = %s %s\n" % (source, agent, target, trans["rate"])
+            # Vaccination
             elif "start" in trans:
                 start = trans["start"]
                 text += "  - %s -> %s %s starting at %s days\n" % (
@@ -567,8 +756,25 @@ class EpiModel(object):
                     rate,
                     start,
                 )
+            # Viral transition
+            elif "source_rate" in trans:
+                text += "  - %s => %s %s %s" % (
+                    source,
+                    target,
+                    trans["source_rate"],
+                    trans["target_rate"],
+                )
+            # Spontaneous
             else:
                 text += "  - %s -> %s %s\n" % (source, target, rate)
+
+        if self.demographics:
+            text += "\n\nDemographics:\n"
+            for comp, data in self.transitions.nodes(data=True):
+                if "birth" in data:
+                    text += "  - -> %s: %s # birth rate\n" % (comp, data["birth"])
+                if "death" in data:
+                    text += "  - %s ->: %s # death rate\n" % (comp, data["death"])
 
         R0 = self.R0()
 
@@ -678,7 +884,7 @@ class EpiModel(object):
                 orig_pos = pos[node[3:]]
                 pos[node] = [orig_pos[0], orig_pos[1] - 1]
             else:
-                node_colors.append(epi_colors[node[0]])
+                node_colors.append(utils.EPI_COLORS[node[0]])
 
         edge_labels = {}
 
@@ -741,7 +947,7 @@ class EpiModel(object):
 
         try:
             for node_i, node_j, data in self.transitions.edges(data=True):
-                rate = self.params[data["rate"]]
+                rate = self.params[data["rate"]]  # self.params[data["rate"]]
 
                 if "agent" in data:
                     target = pos[node_j]
@@ -799,6 +1005,33 @@ class EpiModel(object):
         with open(filename, "wt") as f:
             f.write(self.__repr__())
 
+    def list_models() -> List[str]:
+        """
+        List the models available in the official repository
+        """
+        remote_path = utils.get_remote_path()
+        remote_path = os.path.join(remote_path, "model_list.txt")
+
+        cache_dir = utils.get_cache_directory()
+
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir)
+
+        local_path = os.path.join(cache_dir, "model_list.txt")
+
+        # Always get the latest version
+        urlretrieve(remote_path, local_path)
+        models = [line.strip() for line in open(local_path, "rt").readlines()]
+
+        # Add any user models
+        if os.path.exists(cache_dir):
+            for file in os.listdir(cache_dir):
+                if file.endswith(".yaml"):
+                    models.append(file)
+
+        # Make sure to remove duplicates
+        return sorted(set(models))
+
     def load_model(filename: str) -> None:
         """
         Load a model from a file.
@@ -831,3 +1064,25 @@ class EpiModel(object):
                 model.name = data[key]
 
         return model
+
+    def download_model(
+        filename: str, repo: Union[str, None] = None, load_model: bool = True
+    ) -> Union[None, Self]:
+        """
+        Download model from offical repository
+        """
+        remote_path = utils.get_remote_path(repo)
+        remote_path = os.path.join(remote_path, filename)
+
+        cache_dir = utils.get_cache_directory()
+
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir)
+
+        local_path = os.path.join(cache_dir, filename)
+
+        if not os.path.exists(local_path):
+            urlretrieve(remote_path, local_path)
+
+        if load_model:
+            return EpiModel.load_model(local_path)
