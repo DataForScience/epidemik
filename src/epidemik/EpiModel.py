@@ -73,7 +73,6 @@ class EpiModel(object):
         **rates,
     ) -> None:
         """
-<<<<<<< HEAD
         Add an interaction between two compartments.
         
         This method adds a directed edge from the source compartment to the target compartment in the transition graph,
@@ -88,26 +87,7 @@ class EpiModel(object):
         :param rates: Named parameters representing the interaction rates
         :type rates: dict
         :return: None
-=======
-        Add an interaction between two compartments
-
-        Parameters:
-        - source: string
-            Name of the source compartment
-        - target: string
-            Name of the target compartment
-        - agent: string
-            Name of the agent
-        - rate: float, str, None
-            Rate of the interaction
-        - norm: bool
-            Whether to normalize the transition rate or not
-        - rates:
-            Named parameters for the interaction
-
-        Returns:
-        None
->>>>>>> models
+        
         """
 
         if rate is not None:
@@ -359,7 +339,6 @@ class EpiModel(object):
 
     def _new_cases(self, time: float, population: np.ndarray, pos: Dict) -> np.ndarray:
         """
-<<<<<<< HEAD
         Internal function used by integration routine.
         
         :param time: Current simulation time
@@ -370,21 +349,6 @@ class EpiModel(object):
         :type pos: dict
         :return: Array of new cases for each compartment
         :rtype: numpy.ndarray
-=======
-        Internal function used by integration routine
-
-        Parameters:
-        - time: float
-            Current time
-        - population: numpy array
-            Current population of each compartment
-        - pos: dict
-            Dictionary mapping compartment names to indices
-
-        Returns:
-        numpy array
-            Array of new cases for each compartment
->>>>>>> models
         """
         diff = np.zeros(len(pos))
         N = np.sum(population)

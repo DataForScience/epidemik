@@ -35,6 +35,9 @@ enable = true
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.4"
 pytest-cov = "^6.0.0"
+sphinx = "7.4"
+sphinx-rtd-theme = "^3.0.2"
+sphinx-autodoc-typehints = "2.3.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
