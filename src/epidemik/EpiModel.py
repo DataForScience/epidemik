@@ -112,6 +112,7 @@ class EpiModel(object):
         - comps: list, optional, default=None
             List of compartments to which to assign this birth rate.
             If None, apply to all compartments
+
         """
         self.demographics = True
 
