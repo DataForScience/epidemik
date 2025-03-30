@@ -3,7 +3,13 @@
 # @author Bruno Goncalves
 ######################################################
 
-from typing import Dict, List, Set, Union, Self
+from typing import Dict, List, Set, Union
+
+try:
+    from typing import Self
+except ImportError:
+    from typing_extensions import Self
+
 import warnings
 import string
 import time
