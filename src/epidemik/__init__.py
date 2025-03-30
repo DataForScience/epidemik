@@ -11,4 +11,5 @@ from .EpiModel import EpiModel
 from .NetworkEpiModel import NetworkEpiModel
 from .MetaEpiModel import MetaEpiModel
 
-__version__ = "0.1.3.1"
+# Don't forget to update pyproject.toml
+__version__ = "0.1.3.3"
