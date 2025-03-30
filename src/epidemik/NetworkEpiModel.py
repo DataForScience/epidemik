@@ -3,7 +3,7 @@
 # @author Bruno Goncalves
 ######################################################
 
-from typing import Union
+from typing import Union, Optional
 import networkx as nx
 import numpy as np
 from numpy import linalg
@@ -12,32 +12,43 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from .EpiModel import EpiModel
 from collections import Counter
-from .utils import *
+from . import utils
 
 
 class NetworkEpiModel(EpiModel):
-    def __init__(self, network, compartments=None):
+    def __init__(self, network:nx.Graph, compartments: Optional[str]=None):
         super(NetworkEpiModel, self).__init__(compartments)
         self.network = network
         self.kavg_ = 2 * network.number_of_edges() / network.number_of_nodes()
         self.spontaneous = {}
         self.interactions = {}
-        self.params = {}
+        self.params = utils.Parameters()
 
     def integrate(self, timesteps, **kwargs):
         raise NotImplementedError("Network Models don't support numerical integration")
 
     def add_interaction(
-        self, source: str, target: str, agent: str, rescale: bool = False, **rates
+        self, source: str, target: str, agent: str, rate:Optional[float] = None, rescale: bool = False, **rates
     ) -> None:
-        if rescale:
-            rate /= self.kavg_
 
-        self.params.update(rates)
-        rate = list(rates.keys())[0]
+        if rescale:
+            if rate:
+                rate /= self.kavg_
+            else:
+                rates_names = list(rates.keys())
+                rates[rates_names[0]] /= self.kavg_
+
         super(NetworkEpiModel, self).add_interaction(
-            source, target, agent=agent, rate=rate
+            source, target, agent=agent, rate=rate, **rates
         )
+
+        if rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+        else:
+            self.params.define_parameters(**rates)
+            rates = list(rates.keys())
+            rate_key = rates[0]
 
         if source not in self.interactions:
             self.interactions[source] = {}
@@ -45,20 +56,26 @@ class NetworkEpiModel(EpiModel):
         if target not in self.interactions[source]:
             self.interactions[source] = {}
 
-        self.interactions[source][agent] = {"target": target, "rate": rate}
+        self.interactions[source][agent] = {"target": target, "rate": rate_key}
 
-    def add_spontaneous(self, source: str, target: str, **rates):
-        self.params.update(rates)
-        rate = list(rates.keys())[0]
+    def add_spontaneous(self, source: str, target: str, rate: Optional[float], **rates):
+        super(NetworkEpiModel, self).add_spontaneous(source, target, rate=rate, **rates)
 
-        super(NetworkEpiModel, self).add_spontaneous(source, target, rate=rate)
+        if rate is not None:
+            count = len(self.params) + 1
+            rate_key = "rate" + str(count)
+        else:
+            self.params.define_parameters(**rates)
+            rates = list(rates.keys())
+            rate_key = rates[0]
+
         if source not in self.spontaneous:
             self.spontaneous[source] = {}
 
         if target not in self.spontaneous[source]:
             self.spontaneous[source] = {}
 
-        self.spontaneous[source][target] = rate
+        self.spontaneous[source][target] = rate_key
 
     def simulate(self, timesteps: int, seeds, **kwargs) -> None:
         """Stochastically simulate the epidemic model"""

@@ -1,0 +1,23 @@
+# Epidemic Model with 6 compartments and 7 transitions:
+Name: SEIIRD
+
+Parameters:
+  rbeta : 0.166667
+  beta : 0.222222
+  epsilon_a : 0.160000
+  epsilon_s : 0.240000
+  mu : 0.100000
+  mu_nd : 0.090000
+  mu_d : 0.010000
+
+
+Transitions:
+  - S + Ia = E rbeta
+  - S + Is = E beta
+  - E -> Ia epsilon_a 
+  - E -> Is epsilon_s
+  - Ia -> R mu
+  - Is -> R mu_nd
+  - Is -> D mu_d
+
+# R0=2.00

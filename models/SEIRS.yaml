@@ -1,0 +1,15 @@
+# Epidemic Model with 4 compartments and 4 transitions:
+Name: SEIRS
+
+Parameters:
+  beta : 0.200000
+  epsilon : 0.400000
+  mu : 0.100000
+  rho : 0.300000
+
+
+Transitions:
+  - S + I = E beta
+  - E -> I epsilon 
+  - I -> R mu
+  - R -> S rho

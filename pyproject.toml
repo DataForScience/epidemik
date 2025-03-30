@@ -21,6 +21,8 @@ dependencies = [
  "scipy>=1.7",
  "tqdm>=4",
  "pyyaml (>=6.0.2,<7.0.0)",
+ "seaborn (>=0.13.2,<0.14.0)",
+ "scikit-learn (>=1.6.1,<2.0.0)",
 ]
 [project.urls]
 Homepage = "https://github.com/DataForScience/epidemik"
@@ -32,6 +34,10 @@ enable = true
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.4"
+pytest-cov = "^6.0.0"
+sphinx = "7.4"
+sphinx-rtd-theme = "^3.0.2"
+sphinx-autodoc-typehints = "2.3.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]

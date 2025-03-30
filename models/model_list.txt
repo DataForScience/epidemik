@@ -1,0 +1,6 @@
+SEIIR.yaml
+SEIIRD.yaml
+SEIR.yaml
+SEIRS.yaml
+SI.yaml
+SIR.yaml
