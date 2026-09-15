@@ -76,6 +76,11 @@ Behaviour changes
   per-compartment behaviour. Its first positional argument is the rate;
   a list of compartments is still accepted there for compatibility.
 * ``requires-python`` is now ``>=3.9`` and ``pyyaml`` is a dependency.
+* The project is built with `hatchling <https://hatch.pypa.io/>`_ and
+  developed with `uv <https://docs.astral.sh/uv/>`_ (``uv sync``,
+  ``uv run pytest``, ``uv build``); dependencies are pinned in
+  ``uv.lock`` and the GitHub workflows use uv. The poetry configuration
+  and ``requirements.txt`` are gone.
 * Interaction agents are registered as compartments, so a compartment
   that only appears as an agent (e.g. an environmental reservoir) no
   longer crashes :meth:`~epidemik.EpiModel.integrate`.

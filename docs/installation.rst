@@ -17,13 +17,19 @@ The recommended way to install the package is via :program:`pip`:
 From source
 -----------
 
-To install the development version directly from the GitHub repository:
+The repository is managed with `uv <https://docs.astral.sh/uv/>`_. To set
+up a development environment with the package installed in editable mode
+and the test tools pinned in ``uv.lock``:
 
 .. code-block:: bash
 
    git clone https://github.com/DataForScience/epidemik.git
    cd epidemik
-   pip install -e .
+   uv sync                 # add --group docs to also install Sphinx
+   uv run pytest           # run the test suite
+   uv build                # build the wheel and sdist
+
+A plain ``pip install -e .`` also works if you prefer not to use uv.
 
 Dependencies
 ------------

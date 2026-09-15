@@ -39,13 +39,17 @@ Use the package manager [pip](https://pip.pypa.io/en/stable/) to install epidemi
 pip install epidemik
 ```
 
-To install the development version from source:
+To work on the package itself, clone the repository and let [uv](https://docs.astral.sh/uv/) create the development environment (it installs the package in editable mode together with the test tools pinned in `uv.lock`):
 
 ```bash
 git clone https://github.com/DataForScience/epidemik.git
 cd epidemik
-pip install -e .
+uv sync                 # add --group docs to also install Sphinx
+uv run pytest           # run the test suite
+uv build                # build the wheel and sdist
 ```
+
+A plain `pip install -e .` also works if you prefer not to use uv.
 
 <div align="right">[ <a href="#table-of-contents">↑ Back to top ↑</a> ]</div>
 
@@ -241,7 +245,7 @@ The full documentation for this project is available at ReadTheDocs in [html](ht
 Pull requests are welcome. For major changes, please open an issue first
 to discuss what you would like to change.
 
-Please make sure to update tests as appropriate. The test suite can be run with `pytest tests` from the root of the repository.
+Please make sure to update tests as appropriate. The test suite can be run with `uv run pytest` from the root of the repository.
 
 Join our project and provide assistance by:
 * Checking out the list of [open issues](https://github.com/DataForScience/epidemik/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) where we need help.
