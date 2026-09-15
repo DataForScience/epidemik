@@ -774,8 +774,8 @@ class EpiModelTestCase(unittest.TestCase):
 				self.assertIn('SEIR.yaml', listed)
 				self.assertAlmostEqual(seir.R0(), 2.0)
 				self.assertEqual(fetched, [
-					'https://raw.githubusercontent.com/DataForScience/epidemik/refs/heads/models/models/model_list.txt',
-					'https://raw.githubusercontent.com/DataForScience/epidemik/refs/heads/models/models/SEIR.yaml',
+					'https://raw.githubusercontent.com/DataForScience/epidemik/refs/heads/main/models/model_list.txt',
+					'https://raw.githubusercontent.com/DataForScience/epidemik/refs/heads/main/models/SEIR.yaml',
 				])
 			finally:
 				del os.environ['EPIDEMIK_CACHE_DIR']

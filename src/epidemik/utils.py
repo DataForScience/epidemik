@@ -220,8 +220,9 @@ EPI_COLORS = epi_colors
 #: GitHub repository hosting the official library of model files.
 OFFICIAL_REPO = "https://github.com/DataForScience/epidemik/"
 
-#: Branch and directory of :data:`OFFICIAL_REPO` that hold the model files.
-_MODELS_LOCATION = "refs/heads/models/models/"
+#: Location of the model files inside :data:`OFFICIAL_REPO` (the ``models/``
+#: directory of the ``main`` branch).
+_MODELS_LOCATION = "refs/heads/main/models/"
 
 
 def get_cache_directory() -> str:

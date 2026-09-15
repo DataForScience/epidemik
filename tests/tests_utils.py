@@ -86,11 +86,11 @@ class HelpersTestCase(unittest.TestCase):
 	def test_remote_path(self):
 		self.assertEqual(
 			get_remote_path(),
-			'https://raw.githubusercontent.com/DataForScience/epidemik/refs/heads/models/models/'
+			'https://raw.githubusercontent.com/DataForScience/epidemik/refs/heads/main/models/'
 		)
 		self.assertEqual(
 			get_remote_path('https://github.com/someone/models'),
-			'https://raw.githubusercontent.com/someone/models/refs/heads/models/models/'
+			'https://raw.githubusercontent.com/someone/models/refs/heads/main/models/'
 		)
 		self.assertTrue(OFFICIAL_REPO.startswith('https://github.com/'))
 
