@@ -27,13 +27,46 @@ A model is built up from two basic types of transition:
 
 You can declare compartments explicitly when constructing the model, but
 it is also fine to rely on the implicit creation triggered by the calls
-above. Several transitions may share the same source and target (for
-example two interactions driven by different agents); their contributions
-are added together.
+above (agents are created too, so an environmental reservoir that only
+ever appears as an agent is a valid compartment). Several transitions may
+share the same source and target (for example two interactions driven by
+different agents); their contributions are added together.
 
-``print(model)`` gives a textual summary of every transition, of any
-birth/death rates and groups, and of :math:`R_0`;
+``print(model)`` gives a YAML summary of the parameters, every transition,
+any birth/death rates and groups, and :math:`R_0`;
 :meth:`~epidemik.EpiModel.draw_model` draws the compartment graph.
+
+Named parameters
+----------------
+
+Every rate is stored as a named parameter in
+:attr:`~epidemik.EpiModel.params`, an instance of
+:class:`~epidemik.utils.Parameters`. A rate can be given in three ways:
+
+* as a plain number, in which case an anonymous parameter ``rate1``,
+  ``rate2``, ... is created;
+* as a single keyword argument, ``beta=0.3``, which names the parameter;
+* as a string: the name of an existing parameter, or an *expression* in
+  terms of other parameters such as ``"beta/2"`` (the functions ``exp``,
+  ``log``, ``sqrt``, ``sin``, ``cos``, ``abs``, ``min``, ``max`` and the
+  constants ``pi`` and ``e`` are available).
+
+.. code-block:: python
+
+   SIR = EpiModel()
+   SIR.define_parameters(beta=0.3)
+   SIR.add_interaction("S", "I", "I", "beta")
+   SIR.add_spontaneous("I", "R", mu="beta/3")   # mu is tied to beta
+
+   SIR.params["mu"]        # -> 0.1 (evaluated)
+   SIR.params.raw("mu")    # -> "beta/3"
+   SIR.define_parameters(beta=0.6)
+   SIR.R0()                # -> 3.0, mu followed beta
+
+Expressions are evaluated when the model is run (or when :math:`R_0` is
+computed); an expression that refers to an unknown name raises
+:class:`KeyError` at that point, and one that cannot be evaluated raises
+:class:`ValueError`.
 
 Computing :math:`R_0`
 ---------------------
@@ -46,10 +79,17 @@ models with several infectious compartments, and so on:
 
    SEIR.R0()
 
-Vaccination transitions and demographics are ignored in the computation.
+Vaccination transitions and demographics are ignored in the computation,
+and every susceptible class is assumed to hold the whole population at the
+disease-free equilibrium. Susceptible classes are the sources of
+interactions that are not infected themselves and are only fed by infected
+or post-infection compartments -- so ``S`` in an SIRS model qualifies,
+while a class ``V`` fed by vaccinating ``S`` does not.
+
 If the model has no infectious dynamics (or :math:`R_0` cannot be derived
 for some other reason), :meth:`~epidemik.EpiModel.R0` returns ``None``.
-Multi-group (vector-borne) models are not supported yet and also return
+Multi-group (vector-borne) models and within-host models (unnormalized
+interactions or viral generation) are not supported and also return
 ``None``.
 
 Running the dynamics
@@ -71,6 +111,16 @@ the initial size of each compartment as keyword arguments:
 
    SEIR.integrate(365, S=9_990, I=10, R=0)
    SEIR.simulate(365, S=9_990, I=10, R=0)
+
+All random numbers used by :meth:`~epidemik.EpiModel.simulate` come from
+the model's :attr:`~epidemik.EpiModel.rng`, a
+:class:`numpy.random.Generator` created from the ``seed`` argument of the
+constructor (or passed in directly as ``rng``), so simulations are
+reproducible:
+
+.. code-block:: python
+
+   SEIR = EpiModel(seed=42)
 
 Results are stored as a :class:`pandas.DataFrame` in
 :attr:`~epidemik.EpiModel.values_`, indexed by time. Both methods produce
@@ -119,24 +169,36 @@ spontaneous transition that only becomes active for ``time > start``:
 Demographics: births and deaths
 -------------------------------
 
-Per-capita birth and death rates can be attached to one or all
-compartments. Enabling either puts the model in *demographics mode*:
+Birth and death rates can be attached to one or all compartments.
+Enabling either puts the model in *demographics mode*:
 
 .. code-block:: python
 
-   SEIR.add_birth_rate(0.0001)              # applied to every compartment
-   SEIR.add_death_rate(0.0001, comps=["R"])  # applied only to "R"
+   SEIR.add_birth_rate(0.0001, comps=["S"])   # newborns are susceptible
+   SEIR.add_death_rate(0.0001)               # applied to every compartment
+
+By default births into a compartment are proportional to the **total**
+population (``rate * N``, the classical setup where every newborn is
+susceptible) and deaths are proportional to the compartment itself
+(``rate * X``). Both methods accept further modes:
+
+* ``fixed=True`` -- a constant number of individuals per unit time
+  (e.g. a constant supply of target cells);
+* ``global_rate=True/False`` -- proportional to the total population or
+  to the compartment itself;
+* ``from_group=True`` (births only) -- proportional to the population of
+  the group containing the compartment (see `Multi-group and
+  vector-borne models`_ below).
 
 Both ODE integration and stochastic simulation are aware of demographics:
 in :meth:`~epidemik.EpiModel.integrate` births and deaths enter the
-equations as ``rate * X`` terms, while in
-:meth:`~epidemik.EpiModel.simulate` births are sampled from a binomial
-distribution and deaths compete with the other transitions out of each
-compartment in the same multinomial draw. By default the inflow into compartment ``X`` is
-proportional to ``X`` itself; pass ``from_group=True`` to
-:meth:`~epidemik.EpiModel.add_birth_rate` to make it proportional to the
-total population of the group that contains ``X`` instead (see
-`Multi-group and vector-borne models`_ below).
+equations as flow terms, while in :meth:`~epidemik.EpiModel.simulate`
+births are sampled from a binomial (or Poisson) distribution and deaths
+compete with the other transitions out of each compartment in the same
+multinomial draw, so compartments never become negative.
+
+For backwards compatibility the list of compartments may also be given
+first together with a named rate: ``add_birth_rate("S", b=0.01)``.
 
 Multi-group and vector-borne models
 -----------------------------------
@@ -192,6 +254,39 @@ unassigned. If a group is empty its force of infection is simply zero.
 Groups cannot be combined with age structure, and
 :meth:`~epidemik.EpiModel.R0` returns ``None`` for multi-group models.
 
+Within-host models
+------------------
+
+Two additional building blocks make it possible to write models of
+infection *within* a host, such as the target-cell-limited model of viral
+dynamics:
+
+* ``norm=False`` on :meth:`~epidemik.EpiModel.add_interaction` turns the
+  term into the plain mass-action product ``rate * source * agent``,
+  without dividing by the population;
+* :meth:`~epidemik.EpiModel.add_viral_generation` encodes the asymmetric
+  reaction ``source => target``: infected cells die at one rate while, per
+  infected cell, virions are produced at another.
+
+.. code-block:: python
+
+   TCL = EpiModel()
+   TCL.define_parameters(s=1e5, d=0.01, beta=2e-7, delta=0.5, p=100, c=2)
+   TCL.add_birth_rate("s", comps=["T"], fixed=True)   # constant supply of cells
+   TCL.add_death_rate("d", comps=["T"])
+   TCL.add_interaction("T", "I", "V", "beta", norm=False)  # T + V -> I + V
+   TCL.add_viral_generation("I", "V", "delta", "p")        # I dies, V is produced
+   TCL.add_death_rate("c", comps=["V"])                    # viral clearance
+   TCL.integrate(60, T=1e7, I=0, V=10)
+
+This integrates :math:`\dot T = s - dT - \beta T V`,
+:math:`\dot I = \beta T V - \delta I` and :math:`\dot V = pI - cV`.
+In :meth:`~epidemik.EpiModel.simulate`, cell death competes with the other
+transitions and virion production is drawn from a Poisson distribution.
+:meth:`~epidemik.EpiModel.R0` returns ``None`` for such models, since the
+within-host reproduction number depends on the initial number of target
+cells.
+
 Age structure
 -------------
 
@@ -227,7 +322,9 @@ Initial conditions given with the original compartment names are split
 across age groups proportionally to ``population`` (exactly in
 :meth:`~epidemik.EpiModel.integrate`, with a multinomial draw in
 :meth:`~epidemik.EpiModel.simulate`). Expanded names such as ``S_a=500``
-can also be passed directly. After the run, the per-age-group time series
+can also be passed directly. The rescaled interaction rates become new
+parameters named ``<rate>_<ij>`` (e.g. ``beta_ab``) defined as expressions
+of the original ones, so redefining ``beta`` afterwards still works. After the run, the per-age-group time series
 are available in :attr:`~epidemik.EpiModel.values_ages_` and the totals
 (across age groups) in :attr:`~epidemik.EpiModel.values_`. Individual age
 strata can be retrieved with ``model["S_a"]`` or ``model[["S_a", "S_b"]]``.
@@ -271,3 +368,58 @@ After running either :meth:`~epidemik.EpiModel.integrate` or
 
 Using ``model["X"]`` or :meth:`~epidemik.EpiModel.plot` before running the
 model raises :class:`~epidemik.utils.NotInitialized`.
+:meth:`~epidemik.EpiModel.reset` discards the results of a previous run.
+
+Saving, loading and sharing models
+----------------------------------
+
+A model definition can be written to a YAML file and read back:
+
+.. code-block:: python
+
+   SIR.name = "SIR"
+   SIR.save_model("SIR.yaml")
+   SIR2 = EpiModel.load_model("SIR.yaml", seed=1)
+
+The file is exactly the output of ``print(SIR)``:
+
+.. code-block:: yaml
+
+   # Epidemic Model with 3 compartments and 2 transitions:
+   Name: SIR
+
+   Compartments: [S, I, R]
+
+   Parameters:
+     beta: 0.3
+     mu: "beta/3"
+
+   Transitions:
+     - S + I = I beta
+     - I -> R mu
+
+   # R0=3.00
+
+Transitions are written as ``S + I = I beta`` (interaction, with a
+trailing ``unnormalized`` when ``norm=False``), ``I -> R mu``
+(spontaneous), ``S -> V nu starting at 60 days`` (vaccination) and
+``I => V delta p`` (viral generation). Rates may be parameter names or
+numeric literals. Optional ``Demographics`` (a list of
+``{compartment: S, birth: b}`` / ``{compartment: I, death: d}`` mappings
+with ``fixed``, ``global`` and ``from_group`` flags) and ``Groups``
+sections round-trip the corresponding features; ``Compartments`` fixes
+the order of the compartments and may be omitted.
+
+A small library of ready-made models (SI, SIR, SEIR, SEIRS, SEIIR,
+SEIIRD) is hosted in the ``epidemik`` GitHub repository:
+
+.. code-block:: python
+
+   EpiModel.list_models()                     # -> ["SEIIR.yaml", "SEIIRD.yaml", ...]
+   SEIR = EpiModel.download_model("SEIR.yaml")
+
+Downloaded files are cached in a per-user directory (see
+:func:`epidemik.utils.get_cache_directory`; override it with the
+``EPIDEMIK_CACHE_DIR`` environment variable). Both functions accept a
+``repo`` argument that can be another GitHub repository or a local
+directory of model files.

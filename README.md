@@ -72,12 +72,14 @@ Here's a brief high-level overview of the tech stack the `epidemik` package uses
 ## Features[![](https://raw.githubusercontent.com/DataForScience/epidemik/main/images/pin.svg)](#features)
 
 - Arbitrary compartmental models built from *interaction* (`S + I -> I + I`) and *spontaneous* (`I -> R`) transitions
-- Deterministic ODE integration and discrete-time stochastic simulation with the same interface
+- Named parameters that can be expressions of one another (`mu="beta/2"`)
+- Deterministic ODE integration and reproducible (seeded) discrete-time stochastic simulation with the same interface
 - Generic computation of the basic reproduction number R<sub>0</sub> using the next-generation matrix
 - Time-gated vaccination campaigns, birth and death rates, seasonal forcing
 - Age structure driven by a contact matrix
-- Multi-group (host/vector) models for vector-borne diseases
+- Multi-group (host/vector) models for vector-borne diseases and within-host (viral dynamics) models
 - Epidemics on contact networks (`NetworkEpiModel`) and across coupled sub-populations (`MetaEpiModel`)
+- Save and load model definitions as YAML files, and download ready-made models from the `epidemik` repository
 - Quick plotting of trajectories and of the model structure itself
 
 <div align="right">[ <a href="#table-of-contents">↑ Back to top ↑</a> ]</div>
@@ -99,27 +101,33 @@ from epidemik import EpiModel
 To instantiate a new compartmental model we just need to create a `EpiModel` object and add the relevant transitions:
 
 ```python
-beta = 0.2
-mu = 0.1
-
-SIR = EpiModel()
-SIR.add_interaction('S', 'I', 'I', beta)
-SIR.add_spontaneous('I', 'R', mu)
+SIR = EpiModel(seed=42)
+SIR.add_interaction('S', 'I', 'I', beta=0.2)
+SIR.add_spontaneous('I', 'R', mu=0.1)
 ```
 
-This fully defines the model. We can get a textual representation of the model using
+This fully defines the model. Rates are stored as named parameters (`SIR.params`) and may be expressions of one another, e.g. `mu="beta/2"`. We can get a textual representation of the model using
 ```python
 print(SIR)
 ```
 
-resulting in a simple description of the model structure.
+resulting in a YAML description of the model structure.
 
-    Epidemic Model with 3 compartments and 2 transitions:
+    # Epidemic Model with 3 compartments and 2 transitions:
 
-	S + I = I 0.200000
-	I -> R 0.100000
+    Compartments: [S, I, R]
 
-	R0=2.00
+    Parameters:
+      beta: 0.2
+      mu: 0.1
+
+    Transitions:
+      - S + I = I beta
+      - I -> R mu
+
+    # R0=2.00
+
+The same text can be written to a file with `SIR.save_model("SIR.yaml")` and read back with `EpiModel.load_model("SIR.yaml")`. A library of ready-made models can be listed with `EpiModel.list_models()` and fetched with `EpiModel.download_model("SEIR.yaml")`.
 
 or a graphical representation by calling `draw_model()`:
 
@@ -167,7 +175,7 @@ Vaccination campaigns, birth and death rates, seasonality, age structure and hos
 
 ```python
 SIR.add_vaccination("S", "V", rate=0.01, start=60)  # 1%/day, from day 60
-SIR.add_birth_rate(0.0001)
+SIR.add_birth_rate(0.0001, comps=["S"])             # newborns are susceptible
 SIR.add_death_rate(0.0001)
 
 vector = EpiModel()

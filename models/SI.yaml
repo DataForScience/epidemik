@@ -1,0 +1,8 @@
+# Epidemic Model with 2 compartments and 1 transitions:
+
+Parameters:
+  beta : 0.200000
+
+
+Transitions:
+  - S + I = I beta

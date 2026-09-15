@@ -68,7 +68,9 @@ class NetworkEpiModelTestCase(unittest.TestCase):
 		model.add_spontaneous('I', 'R', self.mu)
 		model.add_spontaneous('I', 'D', 0.05)
 
-		self.assertEqual(model.spontaneous['I'], {'R': self.mu, 'D': 0.05})
+		self.assertEqual(sorted(model.spontaneous['I']), ['D', 'R'])
+		self.assertEqual(model.params[model.spontaneous['I']['R']['rate']], self.mu)
+		self.assertEqual(model.params[model.spontaneous['I']['D']['rate']], 0.05)
 
 		model.simulate(100, seeds={0: 'I', 1: 'I', 2: 'I', 3: 'I', 4: 'I'})
 		self.assertGreater(model.values_['R'].iloc[-1], 0)
@@ -124,14 +126,16 @@ class NetworkEpiModelTestCase(unittest.TestCase):
 		self.assertIsNone(model.R0())
 
 	def test_large_spontaneous_rates_warn(self):
-		model = NetworkEpiModel(self.G)
-		model.add_interaction('S', 'I', 'I', self.beta)
+		model = NetworkEpiModel(self.G, seed=3)
+		model.add_interaction('S', 'I', 'I', 0.0)
 		model.add_spontaneous('I', 'R', 0.8)
 		model.add_spontaneous('I', 'D', 0.8)
 		with self.assertWarns(UserWarning):
 			model.simulate(10, seeds={0: 'I', 1: 'I'})
 		self.assertTrue((model.values_.sum(axis=1) == 200).all())
-		self.assertEqual(model.values_['I'].iloc[-1], 0)
+		# renormalized probabilities: every infected node leaves at the first step
+		self.assertEqual(model.values_['I'].iloc[1], 0)
+		self.assertEqual(model.values_['R'].iloc[1] + model.values_['D'].iloc[1], 2)
 
 	def test_spontaneous_into_active_state(self):
 		# E -> I keeps the node active so it can go on to infect others
@@ -173,6 +177,56 @@ class NetworkEpiModelTestCase(unittest.TestCase):
 		self.assertEqual(model.values_.iloc[0].tolist(), [4, 0, 1])
 		self.assertEqual(model.values_.iloc[-1].tolist(), [0, 4, 1])
 
+	def test_named_parameters_and_rescale(self):
+		model = NetworkEpiModel(self.G)
+		model.add_interaction('S', 'I', 'I', beta=self.beta, rescale=True)
+		model.add_spontaneous('I', 'R', mu=self.mu)
+		self.assertIn('beta', model.params)
+		self.assertEqual(model.params.raw('beta_rescaled'), '(beta)/%r' % model.kavg_)
+		self.assertAlmostEqual(model.R0(), np.round(self.beta/self.mu, 2))
+		self.assertEqual(model.interactions['S']['I'][0]['rate'], 'beta_rescaled')
 
-if __name__ == '__main__':
-	unittest.main()
+	def test_parallel_interaction_edges(self):
+		model = NetworkEpiModel(nx.complete_graph(200), seed=1)
+		model.add_interaction('S', 'I', 'I', 0.3)
+		model.add_interaction('S', 'Q', 'I', 0.3)
+		model.add_spontaneous('I', 'R', 0.0)
+		model.simulate(3, seeds={0: 'I'})
+		self.assertGreater(model.values_['I'].iloc[-1], 1)
+		self.assertGreater(model.values_['Q'].iloc[-1], 0)
+		self.assertTrue((model.values_.sum(axis=1) == 200).all())
+
+		hot = NetworkEpiModel(nx.complete_graph(20))
+		hot.add_interaction('S', 'I', 'I', 0.8)
+		hot.add_interaction('S', 'Q', 'I', 0.8)
+		with self.assertWarns(UserWarning):
+			hot.simulate(2, seeds={0: 'I'})
+		self.assertEqual(hot.values_['S'].iloc[-1], 0)
+
+	def test_vaccination(self):
+		model = NetworkEpiModel(self.G, seed=1)
+		model.add_interaction('S', 'I', 'I', 0.0)
+		model.add_spontaneous('I', 'R', 0.0)
+		model.add_vaccination('S', 'V', 0.5, start=3)
+		model.simulate(6, seeds={0: 'I'})
+		self.assertEqual(model.values_['V'].loc[3], 0)
+		self.assertGreater(model.values_['V'].loc[4], 0)
+		self.assertIn('starting at 3 days', repr(model))
+
+		with self.assertRaises(TypeError):
+			model.add_vaccination('S', 'V', 0.5)
+
+	def test_unsupported_methods(self):
+		for method in ('add_birth_rate', 'add_death_rate', 'add_viral_generation', 'add_age_structure', 'add_groups'):
+			with self.assertRaises(NotImplementedError):
+				getattr(self.SIR, method)(0.1)
+
+	def test_seed_reproducibility(self):
+		runs = []
+		for _ in range(2):
+			model = NetworkEpiModel(self.G, seed=5)
+			model.add_interaction('S', 'I', 'I', self.beta)
+			model.add_spontaneous('I', 'R', self.mu)
+			model.simulate(30, seeds={0: 'I', 1: 'I'})
+			runs.append(model.values_)
+		self.assertTrue(runs[0].equals(runs[1]))

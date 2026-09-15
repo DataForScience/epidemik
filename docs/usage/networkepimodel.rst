@@ -23,22 +23,27 @@ disease transitions are then added in exactly the same way as for an
 
    G = nx.erdos_renyi_graph(n=1_000, p=0.01, seed=42)
 
-   beta, mu = 0.05, 0.1
-   SIR = NetworkEpiModel(G)
-   SIR.add_interaction("S", "I", "I", beta)
-   SIR.add_spontaneous("I", "R", mu)
+   SIR = NetworkEpiModel(G, seed=42)
+   SIR.add_interaction("S", "I", "I", beta=0.05)
+   SIR.add_spontaneous("I", "R", mu=0.1)
 
-On a network, ``rate`` is the probability that a single contact transmits
-the disease during one time step (for interactions) or that an individual
-undergoes the transition during one time step (for spontaneous
-transitions). If you want to keep :math:`R_0` comparable to a mean-field
-model defined with the same rates, you can ask
-:meth:`~epidemik.NetworkEpiModel.add_interaction` to rescale the rate by
-the average degree of the network:
+Rates are named parameters exactly as in :class:`~epidemik.EpiModel`
+(numbers, keywords or expressions). On a network, a rate is the
+probability that a single contact transmits the disease during one time
+step (for interactions) or that an individual undergoes the transition
+during one time step (for spontaneous transitions). If you want to keep
+:math:`R_0` comparable to a mean-field model defined with the same rates,
+you can ask :meth:`~epidemik.NetworkEpiModel.add_interaction` to rescale
+the rate by the average degree of the network; the rescaled value is
+stored as a new parameter ``<name>_rescaled``:
 
 .. code-block:: python
 
-   SIR.add_interaction("S", "I", "I", beta, rescale=True)
+   SIR.add_interaction("S", "I", "I", beta=0.05, rescale=True)
+
+Vaccination campaigns are supported through
+:meth:`~epidemik.NetworkEpiModel.add_vaccination` and behave like
+time-gated spontaneous transitions.
 
 Running a simulation
 --------------------
@@ -65,11 +70,14 @@ After the run:
 * :meth:`~epidemik.EpiModel.plot` produces the usual aggregate plot.
 
 As for :class:`~epidemik.EpiModel`, the first row of both data frames
-(at ``t_min``, which defaults to 1) holds the initial conditions. Seeding
-a node that is not part of the network, or with a state that is not a
-compartment, raises :class:`ValueError`. If the spontaneous transition
-probabilities out of a compartment add up to more than 1 they are
-renormalized and a warning is emitted.
+(at ``t_min``, which defaults to 1) holds the initial conditions, and all
+random numbers come from the model's ``rng`` (see the ``seed`` argument
+of the constructor). Seeding a node that is not part of the network, or
+with a state that is not a compartment, raises :class:`ValueError`. If
+the transition probabilities out of a compartment (or from one contact)
+add up to more than 1 they are renormalized and a warning is emitted.
+When several interactions share the same source and agent, one of the
+targets is chosen at random with probabilities proportional to the rates.
 
 R\ :sub:`0` on a network
 ------------------------
@@ -96,7 +104,8 @@ omitted on networks:
 * :meth:`~epidemik.NetworkEpiModel.integrate` raises
   :class:`NotImplementedError` -- explore the dynamics with
   :meth:`~epidemik.NetworkEpiModel.simulate` instead.
-* Vaccination, seasonality, demographics, groups and age structure are
-  not taken into account by :meth:`~epidemik.NetworkEpiModel.simulate`;
-  they are best modelled by carefully constructing the network or by
-  overlaying the relevant spontaneous transitions yourself.
+* Births, deaths, viral generation, groups and age structure do not make
+  sense when every node is one individual of a fixed population;
+  the corresponding ``add_*`` methods raise :class:`NotImplementedError`.
+* Seasonality is not taken into account by
+  :meth:`~epidemik.NetworkEpiModel.simulate`.

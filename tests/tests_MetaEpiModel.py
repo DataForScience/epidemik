@@ -173,6 +173,34 @@ class MetaEpiModelTestCase(unittest.TestCase):
 		self.assertEqual([MetaEpiModel._peak_color(p, colors) for p in (0, 10, 15, 25, 35, 100)],
 		                 ['a', 'a', 'b', 'c', 'd', 'e'])
 
+	def test_rerun_starts_fresh(self):
+		self.SIR.simulate(5, seed_state='A', I=10)
+		self.SIR.simulate(5, seed_state='A', I=10)
+		state = self.SIR.get_state('A')
+		self.assertEqual(state.values_.shape, (6, 3))
+		self.assertEqual(list(state.values_.index), list(range(1, 7)))
 
-if __name__ == '__main__':
-	unittest.main()
+	def test_seeds_exceeding_population(self):
+		with self.assertRaises(ValueError):
+			self.SIR.simulate(3, seed_state='B', I=20_000)
+
+	def test_seed_reproducibility(self):
+		runs = []
+		for _ in range(2):
+			model = MetaEpiModel(self.travel, self.population, seed=11)
+			model.add_interaction('S', 'I', 'I', beta=self.beta)
+			model.add_spontaneous('I', 'R', mu=self.mu)
+			model.simulate(10, seed_state='A', I=10)
+			runs.append(model.compartments_)
+		self.assertTrue(runs[0].equals(runs[1]))
+
+	def test_named_parameters(self):
+		model = MetaEpiModel(self.travel, self.population)
+		model.define_parameters(beta=0.3)
+		model.add_interaction('S', 'I', 'I', 'beta')
+		model.add_spontaneous('I', 'R', mu='beta/3')
+		self.assertAlmostEqual(model.R0(), 3.0)
+		self.assertEqual(model.params.raw('mu'), 'beta/3')
+		self.assertEqual(model.get_state('B').params.raw('mu'), 'beta/3')
+		model.add_viral_generation('I', 'V', 0.1, 10)
+		self.assertIsNone(model.R0())

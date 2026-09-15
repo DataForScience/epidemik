@@ -39,7 +39,7 @@ extensions = [
     "sphinx_rtd_theme",
 ]
 
-templates_path = ["source/_templates"]
+templates_path = []
 # "._*" entries are macOS/Google Drive metadata files that must not be
 # picked up as documents.
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "._*", "**/._*"]
@@ -85,7 +85,7 @@ intersphinx_timeout = 10
 # -- Options for HTML output -------------------------------------------------
 
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["source/_static"]
+html_static_path = []
 html_title = f"epidemik {release} documentation"
 html_theme_options = {
     "logo_only": False,

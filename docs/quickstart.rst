@@ -22,21 +22,35 @@ spontaneous transition ``I -> R`` describes recoveries at rate
    beta = 0.2
    mu = 0.1
 
-   SIR = EpiModel()
-   SIR.add_interaction("S", "I", "I", beta)
-   SIR.add_spontaneous("I", "R", mu)
+   SIR = EpiModel(seed=42)
+   SIR.add_interaction("S", "I", "I", beta=beta)
+   SIR.add_spontaneous("I", "R", mu=mu)
 
-A printable description of the model is available via ``print``:
+Rates are stored as named parameters (``beta`` and ``mu`` here; a plain
+number would create anonymous ``rate1``, ``rate2``, ... parameters) and
+can be expressions of one another, e.g. ``mu="beta/2"``. A printable,
+YAML-formatted description of the model is available via ``print``:
 
 .. code-block:: pycon
 
    >>> print(SIR)
-   Epidemic Model with 3 compartments and 2 transitions:
+   # Epidemic Model with 3 compartments and 2 transitions:
 
-   S + I = I 0.200000
-   I -> R 0.100000
+   Compartments: [S, I, R]
 
-   R0=2.00
+   Parameters:
+     beta: 0.2
+     mu: 0.1
+
+   Transitions:
+     - S + I = I beta
+     - I -> R mu
+
+   # R0=2.00
+
+The same text is what :meth:`~epidemik.EpiModel.save_model` writes and
+:meth:`~epidemik.EpiModel.load_model` reads; ready-made models can be
+fetched with :meth:`~epidemik.EpiModel.download_model`.
 
 The corresponding compartment graph can be drawn with
 :meth:`~epidemik.EpiModel.draw_model`:
@@ -107,8 +121,9 @@ Where to go next
 ----------------
 
 * :doc:`usage/epimodel` documents the full :class:`~epidemik.EpiModel`
-  API, including demographics, vaccination, age structure, seasonality
-  and multi-group (vector-borne) models.
+  API, including named parameters, demographics, vaccination, age
+  structure, seasonality, multi-group (vector-borne) and within-host
+  models, and saving/loading model files.
 * :doc:`usage/networkepimodel` describes how to run the same kind of
   model on top of an arbitrary contact network.
 * :doc:`usage/metaepimodel` shows how to spread an epidemic across many

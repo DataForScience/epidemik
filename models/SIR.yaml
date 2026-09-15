@@ -1,0 +1,13 @@
+# Epidemic Model with 3 compartments and 2 transitions:
+Name: SIR 
+
+Parameters:
+  beta : 0.200000
+  mu : 0.100000
+
+
+Transitions:
+  - S + I = I beta
+  - I -> R mu
+
+# R0=2.00

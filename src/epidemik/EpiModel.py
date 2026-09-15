@@ -4,18 +4,38 @@
 ######################################################
 
 from typing import Dict, List, Set, Union
+import json
+import os
+import re
+import shutil
 import warnings
 import string
+from urllib.request import urlretrieve
 
 import networkx as nx
 import numpy as np
 from numpy import linalg
-from numpy import random
 import scipy.integrate
 import pandas as pd
 import matplotlib.pyplot as plt
+import yaml
 
-from .utils import NotInitialized, epi_colors
+from . import utils
+from .utils import NotInitialized, Parameters, epi_colors
+
+# Grammar of the textual transition format used by __repr__ / save_model /
+# load_model. Compartments and parameters are identifiers; a rate may also
+# be written as a numeric literal.
+_NAME = r"[A-Za-z_][A-Za-z0-9_]*"
+_TOKEN = r"[A-Za-z_][A-Za-z0-9_]*|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
+_RE_INTERACTION = re.compile(
+    r"^\s*(%s)\s*\+\s*(%s)\s*=\s*(%s)\s+(%s)(\s+unnormalized)?\s*$" % (_NAME, _NAME, _NAME, _TOKEN)
+)
+_RE_VACCINATION = re.compile(
+    r"^\s*(%s)\s*->\s*(%s)\s+(%s)\s+starting\s+at\s+(\d+)\s+days?\s*$" % (_NAME, _NAME, _TOKEN)
+)
+_RE_VIRAL = re.compile(r"^\s*(%s)\s*=>\s*(%s)\s+(%s)\s+(%s)\s*$" % (_NAME, _NAME, _TOKEN, _TOKEN))
+_RE_SPONTANEOUS = re.compile(r"^\s*(%s)\s*->\s*(%s)\s+(%s)\s*$" % (_NAME, _NAME, _TOKEN))
 
 
 class EpiModel(object):
@@ -30,10 +50,21 @@ class EpiModel(object):
     numerically solves the corresponding ODEs) or stochastically with
     :meth:`simulate`.
 
+    Every rate is stored as a named parameter in :attr:`params`. Rates can
+    be given as plain numbers (an anonymous parameter ``rate1``, ``rate2``,
+    ... is created), as a named keyword argument (``beta=0.3``), or as an
+    expression in terms of other parameters (``mu="beta/2"``).
+
     Attributes
     ----------
+    name : str or None
+        Optional name of the model, stored by :meth:`save_model`.
     transitions : networkx.MultiDiGraph
         Graph of compartments (nodes) and transitions (edges).
+    params : epidemik.utils.Parameters
+        Named parameters of the model.
+    rng : numpy.random.Generator
+        Random number generator used by :meth:`simulate`.
     values_ : pandas.DataFrame
         Trajectory of every compartment, indexed by time. Only available
         after :meth:`integrate` or :meth:`simulate` has been called.
@@ -43,7 +74,7 @@ class EpiModel(object):
         to :meth:`integrate` or :meth:`simulate`.
     """
 
-    def __init__(self, compartments=None):
+    def __init__(self, compartments=None, seed=None, rng=None, name=None):
         """Initialize an empty :class:`EpiModel` instance.
 
         Parameters
@@ -53,8 +84,18 @@ class EpiModel(object):
             compartments are also added automatically the first time they
             appear in a call to :meth:`add_interaction`,
             :meth:`add_spontaneous` or :meth:`add_vaccination`.
+        seed : int, optional
+            Seed for the random number generator used by :meth:`simulate`.
+            Ignored when ``rng`` is given.
+        rng : numpy.random.Generator, optional
+            Random number generator to use. If ``None`` a new generator is
+            created with :func:`numpy.random.default_rng`.
+        name : str, optional
+            Human-readable name of the model.
         """
+        self.name = name
         self.transitions = nx.MultiDiGraph()
+        self.params = Parameters()
         self.seasonality = None
         self.population = None
         self.contact = None
@@ -63,21 +104,81 @@ class EpiModel(object):
         self.groups = None
         self.comp_to_group = None
 
+        if rng is None:
+            rng = np.random.default_rng(seed)
+
+        self.rng = rng
+
         if compartments is not None:
             self.transitions.add_nodes_from([comp for comp in compartments])
 
     # ------------------------------------------------------------------
+    # Parameters
+    # ------------------------------------------------------------------
+    def define_parameters(self, **kwargs) -> None:
+        """Define (or redefine) named parameters.
+
+        Parameters
+        ----------
+        **kwargs
+            ``name=value`` pairs where ``value`` is a number or an
+            expression string in terms of other parameters (``"beta/2"``).
+
+        Examples
+        --------
+        >>> model = EpiModel()
+        >>> model.define_parameters(beta=0.3, mu="beta/3")
+        >>> model.add_interaction("S", "I", "I", "beta")
+        >>> model.add_spontaneous("I", "R", "mu")
+        """
+        self.params.define_parameters(**kwargs)
+
+    def _register_rate(self, rate, rates: Dict, what: str) -> str:
+        """Store a rate given positionally or as a named keyword.
+
+        Returns the name of the parameter holding the rate. A positional
+        number creates an anonymous parameter ``rate<n>``; a positional
+        string naming an existing parameter is used as is; any other
+        positional string is stored as an anonymous expression.
+        """
+        if rate is not None and rates:
+            raise TypeError("%s: give the rate either positionally or as a keyword, not both." % what)
+
+        if rate is None:
+            if len(rates) != 1:
+                raise TypeError(
+                    "%s: exactly one rate is required, got %s." % (what, sorted(rates) or "none")
+                )
+
+            key, value = next(iter(rates.items()))
+            self.params.define_parameters(**{key: value})
+            return key
+
+        if isinstance(rate, str) and rate in self.params:
+            return rate
+
+        count = 1
+        while "rate%u" % count in self.params:
+            count += 1
+
+        key = "rate%u" % count
+        self.params.define_parameters(**{key: rate})
+        return key
+
+    # ------------------------------------------------------------------
     # Model definition
     # ------------------------------------------------------------------
-    def add_interaction(self, source: str, target: str, agent: str, rate: float) -> None:
+    def add_interaction(self, source: str, target: str, agent: str, rate=None, norm: bool = True, **rates) -> None:
         """Add an interaction transition between two compartments.
 
-        Encodes a reaction of the form ``source + agent -> target + agent``
-        that occurs with the given per-capita rate. In the mean-field
-        equations the contribution of this transition is
+        Encodes a reaction of the form ``source + agent -> target + agent``.
+        In the mean-field equations the contribution of this transition is
         ``rate * source * agent / N`` where ``N`` is the total population
         (or the population of the agent's group/age stratum -- see
-        :meth:`add_groups` and :meth:`add_age_structure`).
+        :meth:`add_groups` and :meth:`add_age_structure`). With
+        ``norm=False`` the term is the plain mass-action product
+        ``rate * source * agent``, which is the natural choice for
+        within-host models (cells and virions).
 
         Parameters
         ----------
@@ -87,12 +188,21 @@ class EpiModel(object):
             Name of the target compartment.
         agent : str
             Name of the agent compartment driving the interaction.
-        rate : float
-            Per-capita rate at which the interaction takes place.
+        rate : float or str, optional
+            Per-capita rate, given positionally: a number, the name of an
+            existing parameter, or an expression string.
+        norm : bool, default=True
+            Whether to normalize the interaction by the population size.
+        **rates
+            Alternatively, the rate as a single named parameter, e.g.
+            ``beta=0.3``.
         """
-        self.transitions.add_edge(source, target, agent=agent, rate=rate)
+        key = self._register_rate(rate, rates, "add_interaction")
+        # Keep the natural compartment order (source, target, then agent)
+        self.transitions.add_nodes_from([source, target, agent])
+        self.transitions.add_edge(source, target, agent=agent, rate=key, norm=norm)
 
-    def add_spontaneous(self, source: str, target: str, rate: float) -> None:
+    def add_spontaneous(self, source: str, target: str, rate=None, **rates) -> None:
         """Add a spontaneous transition between two compartments.
 
         Encodes a reaction of the form ``source -> target`` that occurs at
@@ -104,36 +214,106 @@ class EpiModel(object):
             Name of the source compartment.
         target : str
             Name of the target compartment.
-        rate : float
-            Per-capita rate at which the transition takes place.
+        rate : float or str, optional
+            Per-capita rate, given positionally (number, parameter name or
+            expression).
+        **rates
+            Alternatively, the rate as a single named parameter, e.g.
+            ``mu=0.1``.
         """
-        self.transitions.add_edge(source, target, rate=rate)
+        key = self._register_rate(rate, rates, "add_spontaneous")
+        self.transitions.add_edge(source, target, rate=key)
 
-    def add_birth_rate(self, rate: float, comps: Union[List, None] = None, from_group: bool = False) -> None:
-        """Attach a birth rate to one or more compartments.
+    def add_viral_generation(self, source: str, target: str, source_rate=None, target_rate=None, **rates) -> None:
+        """Add an asymmetric production transition (e.g. virions from infected cells).
 
-        Enabling births (or deaths) switches the model into demographics
-        mode: per-capita inflows are added to the chosen compartments during
-        both :meth:`integrate` and :meth:`simulate`.
+        Encodes ``source => target``: individuals in ``source`` are removed
+        at rate ``source_rate`` (cell death) while, independently, new
+        individuals appear in ``target`` at rate ``target_rate`` per
+        ``source`` individual (viral production). Unlike a spontaneous
+        transition the two flows are not equal.
 
         Parameters
         ----------
-        rate : float
-            Birth rate. Interpreted per capita by default, or per
-            *group* total when ``from_group=True`` -- see below.
+        source : str
+            Producing compartment (e.g. infected cells).
+        target : str
+            Produced compartment (e.g. free virus).
+        source_rate : float or str, optional
+            Removal rate of ``source`` individuals.
+        target_rate : float or str, optional
+            Production rate of ``target`` individuals per ``source``
+            individual.
+        **rates
+            Alternatively, exactly two named parameters, the first being the
+            source rate and the second the target rate, e.g.
+            ``delta=0.5, p=100``.
+        """
+        if source_rate is None and target_rate is None:
+            if len(rates) != 2:
+                raise TypeError("add_viral_generation requires exactly two rates.")
+            (source_name, source_value), (target_name, target_value) = rates.items()
+            source_key = self._register_rate(None, {source_name: source_value}, "add_viral_generation")
+            target_key = self._register_rate(None, {target_name: target_value}, "add_viral_generation")
+        elif source_rate is None or target_rate is None or rates:
+            raise TypeError("add_viral_generation requires exactly two rates.")
+        else:
+            source_key = self._register_rate(source_rate, {}, "add_viral_generation")
+            target_key = self._register_rate(target_rate, {}, "add_viral_generation")
+
+        self.transitions.add_edge(source, target, rate=source_key, viral_source=True, viral_target=False,
+                                  viral_pair=(source_key, target_key))
+        self.transitions.add_edge(source, target, rate=target_key, viral_source=False, viral_target=True,
+                                  viral_pair=(source_key, target_key))
+
+    def _split_rate_and_comps(self, rate, comps, rates):
+        """Accept ``add_birth_rate("S", b=0.1)``-style calls (compartments first)."""
+        if isinstance(rate, (list, tuple, set)):
+            return None, list(rate)
+
+        if isinstance(rate, str) and rates and rate in self.transitions.nodes and comps is None:
+            return None, [rate]
+
+        return rate, comps
+
+    def add_birth_rate(self, rate=None, comps: Union[List, None] = None, fixed: bool = False,
+                       global_rate: bool = True, from_group: bool = False, **rates) -> None:
+        """Attach a birth rate to one or more compartments.
+
+        Enabling births (or deaths) switches the model into demographics
+        mode: inflows are added to the chosen compartments during both
+        :meth:`integrate` and :meth:`simulate`. The inflow into each listed
+        compartment ``X`` is, per unit time:
+
+        * ``rate * N`` with ``global_rate=True`` (the default), where ``N``
+          is the total population -- the classical setup where every
+          newborn enters the susceptible compartment;
+        * ``rate * X`` with ``global_rate=False``;
+        * ``rate * N_group(X)`` with ``from_group=True``, where
+          ``N_group(X)`` is the population of the group containing ``X``
+          (see :meth:`add_groups`) -- the canonical setup for vector-borne
+          models where all newborn vectors are susceptible;
+        * exactly ``rate`` individuals with ``fixed=True``.
+
+        Parameters
+        ----------
+        rate : float or str, optional
+            Birth rate (number, parameter name or expression). For backwards
+            compatibility, a list of compartments may also be given here
+            together with a named rate (``add_birth_rate(["S"], b=0.1)``).
         comps : list, optional
             Compartments to which to assign this birth rate. If ``None``
             (the default) the rate is applied to every compartment.
+        fixed : bool, default=False
+            If True, ``rate`` is a constant number of births per unit time.
+        global_rate : bool, default=True
+            If True, births are proportional to the total population.
         from_group : bool, default=False
-            If ``False`` (default), each listed compartment ``X`` receives
-            an inflow of ``rate * X`` per unit time (the classical
-            per-capita birth term). If ``True``, each listed compartment
-            ``X`` receives an inflow of ``rate * N_{group(X)}``, where
-            ``N_{group(X)}`` is the total population of the group that
-            contains ``X``. This is the canonical setup for vector-borne
-            models, where all newborn vectors are susceptible and the
-            total vector birth flow is ``mv * Nv`` channelled into
-            ``Sv``. Requires :meth:`add_groups` to have been called.
+            If True, births are proportional to the group total. Requires
+            :meth:`add_groups`.
+        **rates
+            Alternatively, the rate as a single named parameter, e.g.
+            ``b=0.01``.
 
         Raises
         ------
@@ -148,12 +328,15 @@ class EpiModel(object):
         every age stratum of the compartment. Rates added *after* must use
         the expanded compartment names (``"S_a"``, ``"S_b"``, ...).
         """
+        rate, comps = self._split_rate_and_comps(rate, comps, rates)
+
         if from_group and self.groups is None:
             raise ValueError(
                 "add_birth_rate(..., from_group=True) requires add_groups "
                 "to have been called first."
             )
 
+        key = self._register_rate(rate, rates, "add_birth_rate")
         self.demographics = True
 
         if comps is None:
@@ -161,20 +344,39 @@ class EpiModel(object):
 
         for comp in comps:
             self.transitions.add_node(comp)
-            self.transitions.nodes[comp]['birth'] = rate
+            self.transitions.nodes[comp]['birth'] = key
+            self.transitions.nodes[comp]['fixed_birth'] = fixed
+            self.transitions.nodes[comp]['global_birth'] = bool(global_rate) and not from_group
             self.transitions.nodes[comp]['birth_from_group'] = from_group
 
-    def add_death_rate(self, rate: float, comps: Union[List, None] = None) -> None:
+    def add_death_rate(self, rate=None, comps: Union[List, None] = None, fixed: bool = False,
+                       global_rate: bool = False, **rates) -> None:
         """Attach a death rate to one or more compartments.
+
+        The outflow from each listed compartment ``X`` is, per unit time,
+        ``rate * X`` by default, ``rate * N`` (with ``N`` the total
+        population) with ``global_rate=True``, or exactly ``rate``
+        individuals with ``fixed=True``.
 
         Parameters
         ----------
-        rate : float
-            Per-capita death rate.
+        rate : float or str, optional
+            Death rate (number, parameter name or expression). A list of
+            compartments may also be given here together with a named rate.
         comps : list, optional
             Compartments to which to assign this death rate. If ``None``
             (the default) the rate is applied to every compartment.
+        fixed : bool, default=False
+            If True, ``rate`` is a constant number of deaths per unit time.
+        global_rate : bool, default=False
+            If True, deaths are proportional to the total population.
+        **rates
+            Alternatively, the rate as a single named parameter, e.g.
+            ``d=0.01``.
         """
+        rate, comps = self._split_rate_and_comps(rate, comps, rates)
+
+        key = self._register_rate(rate, rates, "add_death_rate")
         self.demographics = True
 
         if comps is None:
@@ -182,9 +384,11 @@ class EpiModel(object):
 
         for comp in comps:
             self.transitions.add_node(comp)
-            self.transitions.nodes[comp]['death'] = rate
+            self.transitions.nodes[comp]['death'] = key
+            self.transitions.nodes[comp]['fixed_death'] = fixed
+            self.transitions.nodes[comp]['global_death'] = bool(global_rate)
 
-    def add_vaccination(self, source: str, target: str, rate: float, start: int) -> None:
+    def add_vaccination(self, source: str, target: str, rate=None, start: Union[int, None] = None, **rates) -> None:
         """Add a time-gated vaccination transition between two compartments.
 
         Identical to :meth:`add_spontaneous` except that the transition is
@@ -196,12 +400,20 @@ class EpiModel(object):
             Name of the source compartment (e.g. ``"S"``).
         target : str
             Name of the target compartment (e.g. ``"V"``).
-        rate : float
-            Per-capita vaccination rate.
+        rate : float or str, optional
+            Per-capita vaccination rate (number, parameter name or
+            expression).
         start : int
             Time step at which the vaccination campaign begins.
+        **rates
+            Alternatively, the rate as a single named parameter, e.g.
+            ``nu=0.01``.
         """
-        self.transitions.add_edge(source, target, rate=rate, start=start)
+        if start is None:
+            raise TypeError("add_vaccination requires the 'start' time of the campaign.")
+
+        key = self._register_rate(rate, rates, "add_vaccination")
+        self.transitions.add_edge(source, target, rate=key, start=start)
 
     def add_age_structure(self, matrix: List, population: List) -> None:
         """Expand the model into an age-structured version.
@@ -212,7 +424,10 @@ class EpiModel(object):
         absolute size of each age group, which is used by :meth:`integrate`
         and :meth:`simulate` to split the initial population across age
         strata. Any birth or death rates already attached to a compartment
-        are copied to every one of its age strata.
+        are copied to every one of its age strata. The rescaled interaction
+        rates are stored as new parameters named ``<rate>_<i><j>`` defined
+        in terms of the original ones, so the original parameters can still
+        be changed afterwards.
 
         Parameters
         ----------
@@ -257,7 +472,8 @@ class EpiModel(object):
 
         age_groups = list(string.ascii_lowercase[:contact.shape[0]])
 
-        model = EpiModel()
+        model = EpiModel(rng=self.rng)
+        model.params = self.params.copy()
         self.orig_comps = list(self.transitions.nodes())
 
         # Create the expanded compartments first so that the ordering is
@@ -276,22 +492,20 @@ class EpiModel(object):
 
                     for j, age_j in enumerate(age_groups):
                         agent_age = data["agent"] + '_' + age_j
+                        key = "%s_%s%s" % (data["rate"], age_i, age_j)
+                        model.params.define_parameters(**{key: "(%s)*%r" % (data["rate"], float(contact[i][j]))})
+                        model.transitions.add_edge(node_age_i, node_age_j, agent=agent_age, rate=key,
+                                                   norm=data.get("norm", True))
 
-                        model.add_interaction(node_age_i, node_age_j, agent_age, data["rate"]*self.contact[i][j])
-
-            # Spontaneous transition
+            # Spontaneous, vaccination or viral transition: same parameters
             else:
                 for age_i in age_groups:
                     node_age_i = node_i + '_' + age_i
                     node_age_j = node_j + '_' + age_i
-
-                    if "start" not in data:
-                        model.add_spontaneous(node_age_i, node_age_j, data["rate"])
-                    else:
-                        # vaccination
-                        model.add_vaccination(node_age_i, node_age_j, data["rate"], data["start"])
+                    model.transitions.add_edge(node_age_i, node_age_j, **data)
 
         self.transitions = model.transitions
+        self.params = model.params
 
     def add_groups(self, groups: Dict[str, List[str]]) -> None:
         r"""Partition compartments into named sub-populations (groups).
@@ -390,13 +604,7 @@ class EpiModel(object):
             )
 
     def _group_populations(self, population: np.ndarray, pos: Dict) -> Dict[str, float]:
-        """Compute the per-compartment effective population.
-
-        Internal helper used when the model has been put in multi-group
-        mode via :meth:`add_groups`. Returns a mapping
-        ``comp -> N_group(comp)``: the total population of the group that
-        contains ``comp``.
-        """
+        """Return ``comp -> N_group(comp)`` for multi-group models."""
         group_totals = {
             name: sum(population[pos[c]] for c in comps if c in pos)
             for name, comps in self.groups.items()
@@ -424,7 +632,7 @@ class EpiModel(object):
 
         return np.sum(population)
 
-    def _transition_rate(self, data: Dict, population: np.ndarray, pos: Dict, N, time: float):
+    def _transition_rate(self, data: Dict, population: np.ndarray, pos: Dict, N, time: float, rates: Dict):
         """Return the effective per-capita rate of a transition at ``time``.
 
         Returns ``None`` when the transition is not active yet (e.g. a
@@ -433,22 +641,51 @@ class EpiModel(object):
         if 'start' in data and data['start'] >= time:
             return None
 
-        rate = data['rate']
+        rate = rates[data['rate']]
 
         if 'agent' in data:
             agent = data['agent']
-            n = N[agent] if isinstance(N, dict) else N
+            amount = population[pos[agent]]
 
-            if n <= 0:
-                return 0.0
+            if data.get('norm', True):
+                n = N[agent] if isinstance(N, dict) else N
 
-            rate *= population[pos[agent]]/n
+                if n <= 0:
+                    return 0.0
+
+                amount = amount/n
+
+            rate *= amount
 
             if self.seasonality is not None:
                 curr_t = int(time) % len(self.seasonality)
                 rate *= float(self.seasonality[curr_t])
 
         return rate
+
+    def _expected_births(self, comp: str, data: Dict, population: np.ndarray, pos: Dict, N, rates: Dict) -> float:
+        """Expected number of births into ``comp`` per unit time."""
+        rate = rates[data['birth']]
+
+        if data.get('fixed_birth', False):
+            return rate
+        if data.get('birth_from_group', False):
+            return rate*N[comp]
+        if data.get('global_birth', False):
+            return rate*np.sum(population)
+
+        return rate*population[pos[comp]]
+
+    def _expected_deaths(self, comp: str, data: Dict, population: np.ndarray, pos: Dict, rates: Dict) -> float:
+        """Expected number of deaths out of ``comp`` per unit time."""
+        rate = rates[data['death']]
+
+        if data.get('fixed_death', False):
+            return rate
+        if data.get('global_death', False):
+            return rate*np.sum(population)
+
+        return rate*population[pos[comp]]
 
     def _initial_population(self, pos: Dict, kwargs: Dict, stochastic: bool) -> np.ndarray:
         """Build the initial population vector from ``**kwargs``.
@@ -483,7 +720,7 @@ class EpiModel(object):
                 continue
 
             if stochastic:
-                n = np.random.multinomial(int(value), p)
+                n = self.rng.multinomial(int(value), p)
             else:
                 n = value*p
 
@@ -516,7 +753,7 @@ class EpiModel(object):
             columns += [c for c in totals.columns if c not in columns]
             self.values_ = totals[columns].copy()
 
-    def _new_cases(self, population: np.ndarray, time: float, pos: Dict) -> np.ndarray:
+    def _new_cases(self, population: np.ndarray, time: float, pos: Dict, rates: Dict) -> np.ndarray:
         """Compute the right-hand side of the model ODE system.
 
         Internal helper used by :meth:`integrate`.
@@ -529,6 +766,9 @@ class EpiModel(object):
             Current time.
         pos : dict
             Mapping from compartment name to its index in ``population``.
+        rates : dict
+            Evaluated parameters (see :meth:`Parameters.resolve
+            <epidemik.utils.Parameters.resolve>`).
 
         Returns
         -------
@@ -539,15 +779,20 @@ class EpiModel(object):
         N = self._effective_populations(population, pos)
 
         for source, target, trans in self.transitions.edges(data=True):
-            rate = self._transition_rate(trans, population, pos, N, time)
+            rate = self._transition_rate(trans, population, pos, N, time, rates)
 
             if rate is None:
                 continue
 
             flow = rate*population[pos[source]]
 
-            diff[pos[source]] -= flow
-            diff[pos[target]] += flow
+            # Viral generation edges are asymmetric: the "source" edge only
+            # removes from the source, the "target" edge only produces.
+            if not trans.get('viral_target', False):
+                diff[pos[source]] -= flow
+
+            if not trans.get('viral_source', False):
+                diff[pos[target]] += flow
 
         # Population dynamics (once per RHS evaluation, not per edge)
         if self.demographics:
@@ -555,14 +800,10 @@ class EpiModel(object):
                 comp_id = pos[comp]
 
                 if "birth" in data:
-                    if data.get("birth_from_group", False):
-                        source_pop = N[comp]
-                    else:
-                        source_pop = population[comp_id]
-                    diff[comp_id] += source_pop*data["birth"]
+                    diff[comp_id] += self._expected_births(comp, data, population, pos, N, rates)
 
                 if "death" in data:
-                    diff[comp_id] -= population[comp_id]*data["death"]
+                    diff[comp_id] -= self._expected_deaths(comp, data, population, pos, rates)
 
         return diff
 
@@ -702,13 +943,16 @@ class EpiModel(object):
     def simulate(self, timesteps: int, t_min: int = 1, seasonality: Union[np.ndarray, None] = None, **kwargs) -> None:
         """Run a discrete-time stochastic simulation of the model.
 
-        Each compartment transitions according to a multinomial draw at every
-        time step, with per-step transition probabilities equal to the
-        corresponding rates. Results are stored in the :attr:`values_`
-        attribute as a :class:`pandas.DataFrame` indexed by time: the first
-        row (``t_min``) holds the initial conditions and the remaining
-        ``timesteps - 1`` rows hold the state after each step, mirroring
-        :meth:`integrate`.
+        At every time step the individuals of each compartment are
+        redistributed with a multinomial draw whose probabilities are the
+        outgoing transition rates (deaths included); births are drawn from a
+        binomial (or Poisson, for fixed rates) distribution and viral
+        production from a Poisson distribution. Results are stored in the
+        :attr:`values_` attribute as a :class:`pandas.DataFrame` indexed by
+        time: the first row (``t_min``) holds the initial conditions and the
+        remaining ``timesteps - 1`` rows hold the state after each step,
+        mirroring :meth:`integrate`. All random numbers come from
+        :attr:`rng`.
 
         Parameters
         ----------
@@ -741,6 +985,7 @@ class EpiModel(object):
 
         pos = {comp: i for i, comp in enumerate(self.transitions.nodes())}
         self._check_groups(pos)
+        rates = self.params.resolve()
 
         population = self._initial_population(pos, kwargs, stochastic=True).astype('int')
 
@@ -768,17 +1013,24 @@ class EpiModel(object):
                 # deaths compete with the other transitions out of ``comp``
                 # and the population can never become negative.
                 prob = np.zeros(len(comps)+1, dtype='float')
+                production = []
 
                 for _, node_j, data in self.transitions.edges(comp, data=True):
-                    rate = self._transition_rate(data, pop, pos, N, t)
+                    rate = self._transition_rate(data, pop, pos, N, t, rates)
 
                     if rate is None:
                         continue
 
-                    prob[pos[node_j]] += rate
+                    if data.get('viral_target', False):
+                        production.append((pos[node_j], rate*pop[source]))
+                    elif data.get('viral_source', False):
+                        prob[-1] += rate
+                    else:
+                        prob[pos[node_j]] += rate
 
-                if self.demographics:
-                    prob[-1] = self.transitions.nodes[comp].get('death', 0.0)
+                if self.demographics and 'death' in self.transitions.nodes[comp]:
+                    expected = self._expected_deaths(comp, self.transitions.nodes[comp], pop, pos, rates)
+                    prob[-1] += expected/pop[source]
 
                 total = prob.sum()
 
@@ -796,18 +1048,19 @@ class EpiModel(object):
 
                 prob[source] = max(0.0, 1.0-total)
 
-                delta = random.multinomial(pop[source], prob)
+                delta = self.rng.multinomial(pop[source], prob)
                 deaths = delta[-1]
                 delta = delta[:-1]
                 delta[source] = 0
 
                 changes = np.sum(delta) + deaths
 
-                if changes == 0:
-                    continue
+                if changes > 0:
+                    new_pop[source] -= changes
+                    new_pop += delta
 
-                new_pop[source] -= changes
-                new_pop += delta
+                for target, expected in production:
+                    new_pop[target] += self.rng.poisson(expected)
 
             # Births (deaths are handled above, as competing transitions)
             if self.demographics:
@@ -816,13 +1069,18 @@ class EpiModel(object):
                         continue
 
                     comp_id = pos[comp]
+                    rate = rates[data['birth']]
 
-                    if data.get("birth_from_group", False):
-                        source_pop = int(N[comp])
+                    if data.get('fixed_birth', False):
+                        births = self.rng.poisson(rate)
+                    elif data.get('birth_from_group', False):
+                        births = self.rng.binomial(int(N[comp]), min(rate, 1.0))
+                    elif data.get('global_birth', False):
+                        births = self.rng.binomial(int(np.sum(pop)), min(rate, 1.0))
                     else:
-                        source_pop = pop[comp_id]
+                        births = self.rng.binomial(int(pop[comp_id]), min(rate, 1.0))
 
-                    new_pop[comp_id] += np.random.binomial(source_pop, data["birth"])
+                    new_pop[comp_id] += births
 
             values.append(new_pop)
 
@@ -859,6 +1117,7 @@ class EpiModel(object):
 
         pos = {comp: i for i, comp in enumerate(self.transitions.nodes())}
         self._check_groups(pos)
+        rates = self.params.resolve()
 
         population = self._initial_population(pos, kwargs, stochastic=False)
 
@@ -870,7 +1129,7 @@ class EpiModel(object):
                     self._new_cases,
                     population,
                     time,
-                    args=(pos,)
+                    args=(pos, rates)
                 ), columns=list(pos), index=time
         )
 
@@ -916,57 +1175,94 @@ class EpiModel(object):
         if old_ages is not None:
             self.values_ages_ = pd.concat([old_ages, self.values_ages_.iloc[[-1]]])
 
+    def reset(self) -> None:
+        """Discard the results of any previous :meth:`integrate` or :meth:`simulate` call."""
+        self.__dict__.pop('values_', None)
+        self.__dict__.pop('values_ages_', None)
+
     # ------------------------------------------------------------------
     # Introspection
     # ------------------------------------------------------------------
-    def __repr__(self) -> str:
-        """Return a human-readable description of the model.
+    @staticmethod
+    def _format_value(value) -> str:
+        if isinstance(value, str):
+            return json.dumps(value)
+        return repr(float(value))
 
-        Lists every transition (interaction, spontaneous or vaccination)
-        and, when applicable, the basic reproduction number :math:`R_0`.
+    def __repr__(self) -> str:
+        """Return a human-readable, YAML-compatible description of the model.
+
+        The text lists the parameters, every transition (interaction,
+        spontaneous, vaccination or viral generation), the demographic
+        rates and groups, and -- as a comment -- the basic reproduction
+        number :math:`R_0`. It is exactly what :meth:`save_model` writes
+        and what :meth:`load_model` reads back.
 
         Returns
         -------
         str
             Multi-line description of the model.
         """
-        text = 'Epidemic Model with %u compartments and %u transitions:\n\n' % \
-              (self.transitions.number_of_nodes(),
-               self.transitions.number_of_edges())
+        lines = ['# Epidemic Model with %u compartments and %u transitions:' % (
+            self.transitions.number_of_nodes(), self.transitions.number_of_edges())]
 
+        if self.name is not None:
+            lines.append('Name: %s' % self.name)
+
+        lines += ['', 'Compartments: [%s]' % ', '.join(self.transitions.nodes())]
+
+        lines += ['', 'Parameters:']
+        for key in self.params.keys():
+            lines.append('  %s: %s' % (key, self._format_value(self.params.raw(key))))
+
+        lines += ['', 'Transitions:']
         for source, target, trans in self.transitions.edges(data=True):
-            rate = trans['rate']
-
             if 'agent' in trans:
-                agent = trans['agent']
-                text += "%s + %s = %s %f\n" % (source, agent, target, rate)
+                line = '  - %s + %s = %s %s' % (source, trans['agent'], target, trans['rate'])
+                if not trans.get('norm', True):
+                    line += ' unnormalized'
+                lines.append(line)
             elif 'start' in trans:
-                start = trans['start']
-                text += "%s -> %s %f starting at %s days\n" % (source, target, rate, start)
+                lines.append('  - %s -> %s %s starting at %s days' % (source, target, trans['rate'], trans['start']))
+            elif trans.get('viral_source', False):
+                source_key, target_key = trans['viral_pair']
+                lines.append('  - %s => %s %s %s' % (source, target, source_key, target_key))
+            elif trans.get('viral_target', False):
+                continue
             else:
-                text += "%s -> %s %f\n" % (source, target, rate)
+                lines.append('  - %s -> %s %s' % (source, target, trans['rate']))
 
         if self.demographics:
+            lines += ['', 'Demographics:']
             for comp, data in self.transitions.nodes(data=True):
-                if "birth" in data:
-                    if data.get("birth_from_group", False):
-                        text += "birth -> %s %f (per group total)\n" % (comp, data["birth"])
-                    else:
-                        text += "birth -> %s %f\n" % (comp, data["birth"])
-                if "death" in data:
-                    text += "%s -> death %f\n" % (comp, data["death"])
+                if 'birth' in data:
+                    entry = 'compartment: %s, birth: %s' % (comp, data['birth'])
+                    if data.get('fixed_birth', False):
+                        entry += ', fixed: true'
+                    if data.get('birth_from_group', False):
+                        entry += ', from_group: true'
+                    elif not data.get('global_birth', False):
+                        entry += ', global: false'
+                    lines.append('  - {%s}' % entry)
+                if 'death' in data:
+                    entry = 'compartment: %s, death: %s' % (comp, data['death'])
+                    if data.get('fixed_death', False):
+                        entry += ', fixed: true'
+                    if data.get('global_death', False):
+                        entry += ', global: true'
+                    lines.append('  - {%s}' % entry)
 
         if self.groups is not None:
-            text += "\nGroups:\n"
+            lines += ['', 'Groups:']
             for group_name, comp_list in self.groups.items():
-                text += "  %s: %s\n" % (group_name, ", ".join(comp_list))
+                lines.append('  %s: [%s]' % (group_name, ', '.join(comp_list)))
 
         R0 = self.R0()
 
         if R0 is not None:
-            text += "\nR0=%1.2f" % R0
+            lines += ['', '# R0=%1.2f' % R0]
 
-        return text
+        return '\n'.join(lines) + '\n'
 
     def _get_active(self) -> Set:
         """Return the set of compartments that can drive a transition."""
@@ -980,21 +1276,57 @@ class EpiModel(object):
 
         return active
 
+    def _get_infected(self) -> Set:
+        """Return the compartments that take part in transmission (agents and targets)."""
+        infected = set()
+
+        for node_i, node_j, data in self.transitions.edges(data=True):
+            if "agent" in data:
+                infected.add(data['agent'])
+                infected.add(node_j)
+
+        return infected
+
     def _get_susceptible(self) -> Set:
         """Return the set of compartments that behave as susceptibles.
 
-        Compartments with no incoming transition that are the source of an
-        interaction are considered susceptible. If there are none, every
-        compartment without incoming transitions is used; failing that (e.g.
-        in an SIS model), the source compartments of every interaction.
+        A compartment is susceptible if it is the source of an interaction,
+        is not itself infected (an agent or the target of an interaction),
+        and only receives individuals from infected compartments or from
+        compartments downstream of the infection (e.g. ``R -> S``). In
+        particular a class that is fed by vaccination of the susceptibles
+        (``S -> V``) is *not* susceptible, so that :math:`R_0` describes
+        the disease-free state before vaccination. If no compartment
+        qualifies, every non-infected interaction source is used.
         """
-        no_inflow = set([node for node, deg in self.transitions.in_degree() if deg == 0])
+        infected = self._get_infected()
         sources = set([node_i for node_i, _, data in self.transitions.edges(data=True) if "agent" in data])
 
-        susceptible = no_inflow & sources
+        # Compartments reachable from the infected ones through spontaneous
+        # transitions without passing through an interaction source.
+        removed = set()
+        stack = list(infected)
+
+        while stack:
+            node = stack.pop()
+
+            for _, nxt, data in self.transitions.out_edges(node, data=True):
+                if "agent" in data or nxt in infected or nxt in sources or nxt in removed:
+                    continue
+
+                removed.add(nxt)
+                stack.append(nxt)
+
+        susceptible = set()
+
+        for comp in sources - infected:
+            upstream = set([pred for pred, _, _ in self.transitions.in_edges(comp, data=True)])
+
+            if upstream <= (infected | removed):
+                susceptible.add(comp)
 
         if len(susceptible) == 0:
-            susceptible = no_inflow
+            susceptible = sources - infected
 
         if len(susceptible) == 0:
             susceptible = sources
@@ -1002,21 +1334,15 @@ class EpiModel(object):
         return susceptible
 
     def _get_infections(self) -> Dict:
-        """Return interactions indexed as ``{agent: {source: {target, rate}}}``."""
+        """Return interactions indexed as ``{agent: {source: [{target, rate}, ...]}}``."""
         inf = {}
 
         for node_i, node_j, data in self.transitions.edges(data=True):
             if "agent" in data:
                 agent = data['agent']
-
-                if agent not in inf:
-                    inf[agent] = {}
-
-                if node_i not in inf[agent]:
-                    inf[agent][node_i] = {}
-
-                inf[agent][node_i]['target'] = node_j
-                inf[agent][node_i]['rate'] = data['rate']
+                inf.setdefault(agent, {}).setdefault(node_i, []).append(
+                    {'target': node_j, 'rate': data['rate']}
+                )
 
         return inf
 
@@ -1102,35 +1428,41 @@ class EpiModel(object):
         (2010). :math:`R_0` is returned as the spectral radius of
         :math:`F V^{-1}`, where :math:`F` collects the rates of new
         infections in each infected compartment and :math:`V` collects the
-        rates of all other transitions among infected compartments.
-        Vaccination transitions and demographics are ignored.
+        rates of all other transitions among infected compartments. Every
+        susceptible class (see :meth:`_get_susceptible`) is assumed to hold
+        the whole population at the disease-free equilibrium. Vaccination
+        transitions and demographics are ignored.
 
         Returns
         -------
         float or None
             The basic reproduction number, or ``None`` if it cannot be
-            computed (for example when the model has no infectious dynamics
-            defined, when :math:`V` is singular, or when the model has been
-            put in multi-group mode via :meth:`add_groups` -- vector-borne
-            :math:`R_0` is not yet supported).
+            computed: when the model has no infectious dynamics defined,
+            when :math:`V` is singular, when the model has been put in
+            multi-group mode via :meth:`add_groups`, or when it contains
+            unnormalized interactions or viral generation transitions
+            (within-host models), whose :math:`R_0` depends on the initial
+            conditions.
         """
         if self.groups is not None:
             return None
 
-        infected = set()
+        for _, _, data in self.transitions.edges(data=True):
+            if ('agent' in data and not data.get('norm', True)) or data.get('viral_source') or data.get('viral_target'):
+                return None
 
-        susceptible = self._get_susceptible()
+        try:
+            rates = self.params.resolve()
+        except (KeyError, ValueError):
+            return None
 
-        for node_i, node_j, data in self.transitions.edges(data=True):
-            if "agent" in data:
-                infected.add(data['agent'])
-                infected.add(node_j)
-
-        infected = sorted(infected)
+        infected = sorted(self._get_infected())
         N_infected = len(infected)
 
         if N_infected == 0:
             return None
+
+        susceptible = self._get_susceptible()
 
         F = np.zeros((N_infected, N_infected), dtype='float')
         V = np.zeros((N_infected, N_infected), dtype='float')
@@ -1138,7 +1470,7 @@ class EpiModel(object):
         pos = dict(zip(infected, np.arange(N_infected)))
 
         for node_i, node_j, data in self.transitions.edges(data=True):
-            rate = data['rate']
+            rate = rates[data['rate']]
 
             if "agent" in data:
                 target = pos[node_j]
@@ -1163,3 +1495,217 @@ class EpiModel(object):
             return None
 
         return float(np.max(np.abs(eig)))
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+    def save_model(self, filename: str) -> None:
+        """Save the model definition to a YAML file.
+
+        The file contains the output of ``repr(model)``: the name,
+        parameters, transitions, demographics and groups. It can be read
+        back with :meth:`load_model`.
+
+        Parameters
+        ----------
+        filename : str
+            Path of the file to write.
+        """
+        with open(filename, "wt") as f:
+            f.write(repr(self))
+
+    @staticmethod
+    def _rate_argument(token: str, params: Dict) -> Dict:
+        """Translate a rate token of the text format into ``add_*`` arguments."""
+        if re.match(r"^%s$" % _NAME, token):
+            if token not in params:
+                raise ValueError("Transition refers to undefined parameter '%s'." % token)
+            return {token: params[token]}
+
+        return {"rate": float(token)}
+
+    @staticmethod
+    def load_model(filename: str, seed=None, rng=None) -> "EpiModel":
+        """Load a model definition from a YAML file written by :meth:`save_model`.
+
+        The file is a mapping with the (case-insensitive) keys ``Name``,
+        ``Compartments`` (optional list fixing the compartment order),
+        ``Parameters`` (``name: value`` pairs, values being numbers or
+        expressions), ``Transitions`` (a list of strings such as
+        ``S + I = I beta``, ``I -> R mu``, ``S -> V nu starting at 60 days``
+        or ``I => V delta p``), and optionally ``Demographics`` (a list of
+        ``{compartment: S, birth: b}`` / ``{compartment: I, death: d}``
+        mappings with optional ``fixed``, ``global`` and ``from_group``
+        flags) and ``Groups`` (a mapping from group name to list of
+        compartments).
+
+        Parameters
+        ----------
+        filename : str
+            Path of the file to read.
+        seed : int, optional
+            Seed for the random number generator of the new model.
+        rng : numpy.random.Generator, optional
+            Random number generator for the new model.
+
+        Returns
+        -------
+        EpiModel
+            The loaded model.
+
+        Raises
+        ------
+        ValueError
+            If a transition cannot be parsed or refers to an undefined
+            parameter.
+        """
+        with open(filename, "rt") as f:
+            data = yaml.safe_load(f) or {}
+
+        data = {str(key).lower(): value for key, value in data.items()}
+
+        model = EpiModel(seed=seed, rng=rng, name=data.get("name"))
+        model.transitions.add_nodes_from([str(c) for c in data.get("compartments") or []])
+
+        params = {str(k): v for k, v in (data.get("parameters") or {}).items()}
+        model.define_parameters(**params)
+
+        for trans in data.get("transitions") or []:
+            trans = str(trans)
+
+            match = _RE_INTERACTION.match(trans)
+            if match:
+                source, agent, target, rate, unnormalized = match.groups()
+                model.add_interaction(source, target, agent, norm=unnormalized is None,
+                                      **EpiModel._rate_argument(rate, params))
+                continue
+
+            match = _RE_VACCINATION.match(trans)
+            if match:
+                source, target, rate, start = match.groups()
+                model.add_vaccination(source, target, start=int(start), **EpiModel._rate_argument(rate, params))
+                continue
+
+            match = _RE_VIRAL.match(trans)
+            if match:
+                source, target, source_rate, target_rate = match.groups()
+                source_arg = EpiModel._rate_argument(source_rate, params)
+                target_arg = EpiModel._rate_argument(target_rate, params)
+                if "rate" in source_arg or "rate" in target_arg:
+                    model.add_viral_generation(source, target, float(source_rate), float(target_rate))
+                else:
+                    model.add_viral_generation(source, target, **source_arg, **target_arg)
+                continue
+
+            match = _RE_SPONTANEOUS.match(trans)
+            if match:
+                source, target, rate = match.groups()
+                model.add_spontaneous(source, target, **EpiModel._rate_argument(rate, params))
+                continue
+
+            raise ValueError("Unable to parse transition %r." % trans)
+
+        groups = data.get("groups")
+        if groups:
+            model.add_groups({str(name): [str(c) for c in comps] for name, comps in groups.items()})
+
+        for entry in data.get("demographics") or []:
+            entry = {str(k).lower(): v for k, v in entry.items()}
+            comps = [str(entry["compartment"])]
+
+            if "birth" in entry:
+                model.add_birth_rate(comps=comps, fixed=bool(entry.get("fixed", False)),
+                                     global_rate=bool(entry.get("global", True)),
+                                     from_group=bool(entry.get("from_group", False)),
+                                     **EpiModel._rate_argument(str(entry["birth"]), params))
+            if "death" in entry:
+                model.add_death_rate(comps=comps, fixed=bool(entry.get("fixed", False)),
+                                     global_rate=bool(entry.get("global", False)),
+                                     **EpiModel._rate_argument(str(entry["death"]), params))
+
+        return model
+
+    @staticmethod
+    def _fetch(remote_path: str, filename: str, force: bool = False) -> str:
+        """Copy ``filename`` from a repository into the cache and return its local path."""
+        cache_dir = utils.get_cache_directory()
+        os.makedirs(cache_dir, exist_ok=True)
+        local_path = os.path.join(cache_dir, filename)
+
+        if force or not os.path.exists(local_path):
+            if os.path.isdir(remote_path):
+                shutil.copyfile(os.path.join(remote_path, filename), local_path)
+            else:
+                urlretrieve(remote_path + filename, local_path)
+
+        return local_path
+
+    @staticmethod
+    def list_models(repo: Union[str, None] = None) -> List[str]:
+        """List the model files available in a repository.
+
+        Parameters
+        ----------
+        repo : str, optional
+            GitHub repository URL (defaults to the official ``epidemik``
+            repository) or local directory. A GitHub repository must
+            provide a ``model_list.txt`` index next to the model files.
+
+        Returns
+        -------
+        list of str
+            Sorted file names, including any ``.yaml`` files previously
+            saved in the local cache directory (see
+            :func:`epidemik.utils.get_cache_directory`).
+        """
+        remote_path = utils.get_remote_path(repo)
+
+        if os.path.isdir(remote_path):
+            models = [f for f in os.listdir(remote_path) if f.endswith(".yaml")]
+        else:
+            local_path = EpiModel._fetch(remote_path, "model_list.txt", force=True)
+            with open(local_path, "rt") as f:
+                models = [line.strip() for line in f if line.strip()]
+
+        cache_dir = utils.get_cache_directory()
+
+        if os.path.isdir(cache_dir):
+            models += [f for f in os.listdir(cache_dir) if f.endswith(".yaml")]
+
+        return sorted(set(models))
+
+    @staticmethod
+    def download_model(filename: str, repo: Union[str, None] = None, load_model: bool = True,
+                       force: bool = False, seed=None, rng=None):
+        """Fetch a model file from a repository (caching it locally).
+
+        Parameters
+        ----------
+        filename : str
+            Name of the model file, e.g. ``"SIR.yaml"`` (see
+            :meth:`list_models`).
+        repo : str, optional
+            GitHub repository URL (defaults to the official ``epidemik``
+            repository) or local directory.
+        load_model : bool, default=True
+            If True, return the loaded :class:`EpiModel`; otherwise return
+            the path of the cached file.
+        force : bool, default=False
+            Re-download the file even if it is already cached.
+        seed : int, optional
+            Seed for the random number generator of the loaded model.
+        rng : numpy.random.Generator, optional
+            Random number generator for the loaded model.
+
+        Returns
+        -------
+        EpiModel or str
+            The loaded model, or the local path of the cached file.
+        """
+        remote_path = utils.get_remote_path(repo)
+        local_path = EpiModel._fetch(remote_path, filename, force=force)
+
+        if load_model:
+            return EpiModel.load_model(local_path, seed=seed, rng=rng)
+
+        return local_path

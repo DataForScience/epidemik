@@ -7,7 +7,6 @@ from typing import Dict, Union
 import warnings
 
 import numpy as np
-from numpy import random
 import pandas as pd
 
 from .EpiModel import EpiModel
@@ -37,7 +36,7 @@ class NetworkEpiModel(EpiModel):
         after :meth:`simulate`.
     """
 
-    def __init__(self, network, compartments=None):
+    def __init__(self, network, compartments=None, seed=None, rng=None, name=None):
         """Initialize a network-based epidemic model.
 
         Parameters
@@ -50,8 +49,14 @@ class NetworkEpiModel(EpiModel):
             Optional list of compartment names. Just like in
             :class:`~epidemik.EpiModel`, compartments are also added
             implicitly the first time they appear in a transition.
+        seed : int, optional
+            Seed for the random number generator used by :meth:`simulate`.
+        rng : numpy.random.Generator, optional
+            Random number generator to use instead of a new seeded one.
+        name : str, optional
+            Human-readable name of the model.
         """
-        super(NetworkEpiModel, self).__init__(compartments)
+        super(NetworkEpiModel, self).__init__(compartments, seed=seed, rng=rng, name=name)
         self.network = network
 
         n_nodes = network.number_of_nodes()
@@ -71,7 +76,7 @@ class NetworkEpiModel(EpiModel):
         """
         raise NotImplementedError("Network Models don't support numerical integration")
 
-    def add_interaction(self, source: str, target: str, agent: str, rate: float, rescale: bool = False) -> None:
+    def add_interaction(self, source: str, target: str, agent: str, rate=None, rescale: bool = False, **rates) -> None:
         """Add a contagious interaction between two compartments.
 
         Parameters
@@ -82,21 +87,31 @@ class NetworkEpiModel(EpiModel):
             Name of the target compartment.
         agent : str
             Name of the agent compartment driving the interaction.
-        rate : float
-            Per-contact transmission probability per time step.
+        rate : float or str, optional
+            Per-contact transmission probability per time step (number,
+            parameter name or expression).
         rescale : bool, default=False
-            If True, divide ``rate`` by the average degree of the underlying
+            If True, divide the rate by the average degree of the underlying
             network. This is useful when porting a mean-field rate to a
-            network setting while keeping :math:`R_0` comparable.
+            network setting while keeping :math:`R_0` comparable. The
+            rescaled value is stored as a new parameter ``<name>_rescaled``
+            defined in terms of the original one.
+        **rates
+            Alternatively, the rate as a single named parameter, e.g.
+            ``beta=0.05``.
         """
+        key = self._register_rate(rate, rates, "add_interaction")
+
         if rescale:
-            rate /= self.kavg_
+            rescaled = key + "_rescaled"
+            self.params.define_parameters(**{rescaled: "(%s)/%r" % (key, float(self.kavg_))})
+            key = rescaled
 
-        super(NetworkEpiModel, self).add_interaction(source, target, agent=agent, rate=rate)
+        super(NetworkEpiModel, self).add_interaction(source, target, agent, key)
 
-        self.interactions.setdefault(source, {})[agent] = {'target': target, 'rate': rate}
+        self.interactions.setdefault(source, {}).setdefault(agent, []).append({'target': target, 'rate': key})
 
-    def add_spontaneous(self, source: str, target: str, rate: float) -> None:
+    def add_spontaneous(self, source: str, target: str, rate=None, **rates) -> None:
         """Add a spontaneous transition between two compartments.
 
         Parameters
@@ -105,22 +120,81 @@ class NetworkEpiModel(EpiModel):
             Name of the source compartment.
         target : str
             Name of the target compartment.
-        rate : float
-            Per-individual transition probability per time step.
+        rate : float or str, optional
+            Per-individual transition probability per time step (number,
+            parameter name or expression).
+        **rates
+            Alternatively, the rate as a single named parameter, e.g.
+            ``mu=0.1``.
         """
-        super(NetworkEpiModel, self).add_spontaneous(source, target, rate=rate)
+        key = self._register_rate(rate, rates, "add_spontaneous")
+        super(NetworkEpiModel, self).add_spontaneous(source, target, key)
 
-        self.spontaneous.setdefault(source, {})[target] = rate
+        self.spontaneous.setdefault(source, {})[target] = {'rate': key, 'start': None}
+
+    def add_vaccination(self, source: str, target: str, rate=None, start: Union[int, None] = None, **rates) -> None:
+        """Add a time-gated vaccination transition between two compartments.
+
+        Behaves like :meth:`add_spontaneous` but is only active for
+        ``time > start``.
+
+        Parameters
+        ----------
+        source : str
+            Name of the source compartment.
+        target : str
+            Name of the target compartment.
+        rate : float or str, optional
+            Per-individual vaccination probability per time step.
+        start : int
+            Time step at which the campaign begins.
+        **rates
+            Alternatively, the rate as a single named parameter.
+        """
+        if start is None:
+            raise TypeError("add_vaccination requires the 'start' time of the campaign.")
+
+        key = self._register_rate(rate, rates, "add_vaccination")
+        super(NetworkEpiModel, self).add_vaccination(source, target, key, start=start)
+
+        self.spontaneous.setdefault(source, {})[target] = {'rate': key, 'start': start}
+
+    def _unsupported(self, what: str):
+        raise NotImplementedError(
+            "%s is not supported by NetworkEpiModel: every node is a single individual "
+            "of a fixed population." % what
+        )
+
+    def add_birth_rate(self, *args, **kwargs):
+        """Not supported for network models (raises :class:`NotImplementedError`)."""
+        self._unsupported("add_birth_rate")
+
+    def add_death_rate(self, *args, **kwargs):
+        """Not supported for network models (raises :class:`NotImplementedError`)."""
+        self._unsupported("add_death_rate")
+
+    def add_viral_generation(self, *args, **kwargs):
+        """Not supported for network models (raises :class:`NotImplementedError`)."""
+        self._unsupported("add_viral_generation")
+
+    def add_age_structure(self, *args, **kwargs):
+        """Not supported for network models (raises :class:`NotImplementedError`)."""
+        self._unsupported("add_age_structure")
+
+    def add_groups(self, *args, **kwargs):
+        """Not supported for network models (raises :class:`NotImplementedError`)."""
+        self._unsupported("add_groups")
 
     def simulate(self, timesteps: int, seeds: Dict, t_min: int = 1, susceptible: Union[str, None] = None, **kwargs) -> None:
         """Run a discrete-time stochastic simulation on the network.
 
         At every time step each active node attempts to infect its
-        neighbours and may also undergo spontaneous transitions. The
-        per-node state trajectory is stored in :attr:`population_` and the
-        aggregate compartment counts over time are stored in
-        :attr:`values_`. In both data frames the first row (``t_min``)
-        holds the initial conditions.
+        neighbours and may also undergo spontaneous (or, once started,
+        vaccination) transitions. The per-node state trajectory is stored
+        in :attr:`population_` and the aggregate compartment counts over
+        time are stored in :attr:`values_`. In both data frames the first
+        row (``t_min``) holds the initial conditions. All random numbers
+        come from :attr:`rng`. Seasonality is not supported on networks.
 
         Parameters
         ----------
@@ -159,6 +233,7 @@ class NetworkEpiModel(EpiModel):
 
         pos = {comp: i for i, comp in enumerate(self.transitions.nodes())}
         comps = list(pos)
+        rates = self.params.resolve()
 
         nodes = list(self.network.nodes())
         node_index = {node: i for i, node in enumerate(nodes)}
@@ -181,7 +256,6 @@ class NetworkEpiModel(EpiModel):
         population[0, :] = susceptible
 
         active_states = self._get_active()
-        active_nodes = set()
 
         for node, state in seeds.items():
             if node not in node_index:
@@ -190,39 +264,63 @@ class NetworkEpiModel(EpiModel):
             if state not in pos:
                 raise ValueError("Seed state '%s' is not a compartment of the model." % state)
 
-            i = node_index[node]
-            population[0, i] = state
+            population[0, node_index[node]] = state
 
-            if state in active_states:
-                active_nodes.add(i)
+        # Nodes that can do something on their own: infectious ones and, if
+        # the susceptible state has spontaneous transitions (e.g.
+        # vaccination), every susceptible node too.
+        active_nodes = set(i for i in range(N) if population[0, i] in active_states)
 
-        infections = self._get_infections()
+        # {agent: {source: ([targets], [cumulative probabilities])}}
+        infections = {}
+
+        for agent, by_source in self._get_infections().items():
+            infections[agent] = {}
+
+            for source, options in by_source.items():
+                targets = [option['target'] for option in options]
+                probs = np.array([rates[option['rate']] for option in options], dtype='float')
+
+                if probs.sum() > 1:
+                    warnings.warn(
+                        "The transmission probabilities from '%s' to '%s' sum to more than 1; "
+                        "they were renormalized." % (agent, source), stacklevel=2
+                    )
+                    probs /= probs.sum()
+
+                infections[agent][source] = (targets, np.cumsum(probs))
+
         warned = False
 
-        for t in range(1, timesteps):
-            population[t] = population[t-1]
+        for t in range(t_min+1, t_min+timesteps):
+            row = t - t_min
+            population[row] = population[row-1]
 
             if len(active_nodes) == 0:
                 continue
 
             current_active = list(active_nodes)
-            np.random.shuffle(current_active)
+            self.rng.shuffle(current_active)
 
             for node_i in current_active:
-                state_i = population[t-1, node_i]
+                state_i = population[row-1, node_i]
 
                 if state_i in infections:
                     # contact each neighbour to see if we infect them
                     NN = [node_index[n] for n in self.network.neighbors(nodes[node_i])]
-                    np.random.shuffle(NN)
+                    self.rng.shuffle(NN)
 
                     for node_j in NN:
-                        state_j = population[t-1, node_j]
+                        state_j = population[row-1, node_j]
 
                         if state_j in infections[state_i]:
-                            if np.random.random() < infections[state_i][state_j]['rate']:
-                                new_state = infections[state_i][state_j]['target']
-                                population[t, node_j] = new_state
+                            targets, cumulative = infections[state_i][state_j]
+                            draw = self.rng.random()
+                            choice = int(np.searchsorted(cumulative, draw, side='right'))
+
+                            if choice < len(targets):
+                                new_state = targets[choice]
+                                population[row, node_j] = new_state
 
                                 if new_state in active_states:
                                     active_nodes.add(node_j)
@@ -232,8 +330,11 @@ class NetworkEpiModel(EpiModel):
                 if state_i in self.spontaneous:
                     prob = np.zeros(len(pos))
 
-                    for target, rate in self.spontaneous[state_i].items():
-                        prob[pos[target]] += rate
+                    for target, option in self.spontaneous[state_i].items():
+                        if option['start'] is not None and option['start'] >= t:
+                            continue
+
+                        prob[pos[target]] += rates[option['rate']]
 
                     total = prob.sum()
 
@@ -251,10 +352,10 @@ class NetworkEpiModel(EpiModel):
 
                     prob[pos[state_i]] = max(0.0, 1.0-total)
 
-                    new_state = comps[np.argmax(random.multinomial(1, prob))]
+                    new_state = comps[np.argmax(self.rng.multinomial(1, prob))]
 
                     if new_state != state_i:
-                        population[t, node_i] = new_state
+                        population[row, node_i] = new_state
 
                         if new_state in active_states:
                             active_nodes.add(node_i)

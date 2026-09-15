@@ -34,18 +34,23 @@ The constructor takes two :class:`pandas.DataFrame` arguments:
        {"Population": [100_000, 10_000]}, index=["A", "B"]
    )
 
-   SIR = MetaEpiModel(travel, populations)
-   SIR.add_interaction("S", "I", "I", 0.3)
-   SIR.add_spontaneous("I", "R", 0.1)
+   SIR = MetaEpiModel(travel, populations, seed=42)
+   SIR.add_interaction("S", "I", "I", beta=0.3)
+   SIR.add_spontaneous("I", "R", mu=0.1)
 
 The constructor validates its inputs and raises :class:`ValueError` if the
 travel matrix is not square, if its rows do not sum to 1, or if a
-sub-population is missing from ``populations``.
+sub-population is missing from ``populations``. The optional ``seed``
+(or ``rng``) argument makes the whole simulation -- travel and every
+sub-population -- reproducible. Rates are named parameters exactly as in
+:class:`~epidemik.EpiModel`; ``SIR.params`` and
+:meth:`~epidemik.MetaEpiModel.define_parameters` give access to them.
 
 Every transition added at the metapopulation level --
 :meth:`~epidemik.MetaEpiModel.add_interaction`,
 :meth:`~epidemik.MetaEpiModel.add_spontaneous`,
 :meth:`~epidemik.MetaEpiModel.add_vaccination`,
+:meth:`~epidemik.MetaEpiModel.add_viral_generation`,
 :meth:`~epidemik.MetaEpiModel.add_birth_rate`,
 :meth:`~epidemik.MetaEpiModel.add_death_rate` and
 :meth:`~epidemik.MetaEpiModel.add_groups` -- is propagated to every
@@ -73,7 +78,9 @@ step via :meth:`~epidemik.EpiModel.single_step`) and a *travel* phase
 every sub-population.
 
 If ``seed_state`` is not provided, a :class:`~epidemik.utils.NotInitialized`
-exception is raised. The first positional argument used to be called
+exception is raised; seeds larger than the population of ``seed_state``
+raise :class:`ValueError`. Every call starts a fresh simulation in each
+sub-population. The first positional argument used to be called
 ``timestamp``; that spelling still works but emits a
 :class:`DeprecationWarning`.
 

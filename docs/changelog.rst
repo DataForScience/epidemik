@@ -12,6 +12,32 @@ on the `GitHub releases page
 New features
 ~~~~~~~~~~~~
 
+* Named parameters: every rate is stored in
+  :attr:`EpiModel.params <epidemik.EpiModel.params>` (a
+  :class:`~epidemik.utils.Parameters`) and can be given as a number, as a
+  keyword (``beta=0.3``) or as an expression of other parameters
+  (``mu="beta/2"``); :meth:`EpiModel.define_parameters
+  <epidemik.EpiModel.define_parameters>` declares them up front.
+* Reproducible simulations: every model takes ``seed``/``rng`` arguments
+  and draws all random numbers from its
+  :attr:`~epidemik.EpiModel.rng`; a :class:`~epidemik.MetaEpiModel`
+  shares one generator across the travel step and every sub-population.
+* Within-host models: ``norm=False`` interactions and
+  :meth:`EpiModel.add_viral_generation <epidemik.EpiModel.add_viral_generation>`.
+* Birth and death rates gained ``fixed`` and ``global_rate`` modes;
+  births are now proportional to the total population by default.
+* :meth:`EpiModel.save_model <epidemik.EpiModel.save_model>`,
+  :meth:`EpiModel.load_model <epidemik.EpiModel.load_model>`,
+  :meth:`EpiModel.list_models <epidemik.EpiModel.list_models>` and
+  :meth:`EpiModel.download_model <epidemik.EpiModel.download_model>`
+  read and write YAML model files (including demographics, groups,
+  vaccination and viral generation) and fetch the model library hosted on
+  GitHub, with a local cache. ``models/`` ships six ready-made models.
+* :class:`~epidemik.NetworkEpiModel` supports
+  :meth:`~epidemik.NetworkEpiModel.add_vaccination` and several
+  interactions with the same source and agent.
+* :meth:`EpiModel.reset <epidemik.EpiModel.reset>` discards previous
+  results; ``EpiModel(name=...)`` names a model.
 * :meth:`EpiModel.add_groups <epidemik.EpiModel.add_groups>` partitions the
   compartments into named groups (e.g. hosts and vectors). Interactions are
   then normalized by the population of the agent's group, which yields the
@@ -39,6 +65,31 @@ New features
 Behaviour changes
 ~~~~~~~~~~~~~~~~~
 
+* ``print(model)`` / ``repr(model)`` now produce the YAML model format
+  (compartments, parameters, transitions, demographics, groups, and
+  :math:`R_0` as a comment) instead of the previous free-form listing.
+* Edge and node attributes of ``transitions`` store parameter *names*
+  rather than numeric rates; look the values up in ``model.params``.
+* :meth:`EpiModel.add_birth_rate <epidemik.EpiModel.add_birth_rate>`
+  defaults to births proportional to the total population
+  (``global_rate=True``); pass ``global_rate=False`` for the previous
+  per-compartment behaviour. Its first positional argument is the rate;
+  a list of compartments is still accepted there for compatibility.
+* ``requires-python`` is now ``>=3.9`` and ``pyyaml`` is a dependency.
+* Interaction agents are registered as compartments, so a compartment
+  that only appears as an agent (e.g. an environmental reservoir) no
+  longer crashes :meth:`~epidemik.EpiModel.integrate`.
+* :meth:`MetaEpiModel.simulate <epidemik.MetaEpiModel.simulate>` starts a
+  fresh simulation in every sub-population on each call (previously the
+  histories accumulated) and raises :class:`ValueError` when the seeds
+  exceed the population of ``seed_state``.
+* The susceptible classes used by :math:`R_0` (and by
+  :class:`~epidemik.NetworkEpiModel`) are the interaction sources fed
+  only by infected or post-infection compartments, so the result no
+  longer depends on whether waning immunity is present.
+* :class:`~epidemik.NetworkEpiModel` raises :class:`NotImplementedError`
+  for births, deaths, viral generation, groups and age structure instead
+  of silently ignoring them.
 * :meth:`EpiModel.simulate <epidemik.EpiModel.simulate>` now stores the
   initial conditions in the first row of ``values_`` (at ``t_min``) and
   produces exactly ``timesteps`` rows, exactly like

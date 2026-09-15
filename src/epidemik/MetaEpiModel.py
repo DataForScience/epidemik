@@ -43,7 +43,8 @@ class MetaEpiModel:
         each sub-population (rows). Available after :meth:`simulate`.
     """
 
-    def __init__(self, travel_graph: pd.DataFrame, populations: pd.DataFrame, population: str = 'Population'):
+    def __init__(self, travel_graph: pd.DataFrame, populations: pd.DataFrame, population: str = 'Population',
+                 seed=None, rng=None):
         """Initialize a metapopulation model.
 
         Parameters
@@ -59,6 +60,11 @@ class MetaEpiModel:
         population : str, default='Population'
             Name of the column in ``populations`` that holds the population
             counts.
+        seed : int, optional
+            Seed for the random number generator shared by the travel step
+            and every sub-population.
+        rng : numpy.random.Generator, optional
+            Random number generator to use instead of a new seeded one.
 
         Raises
         ------
@@ -100,10 +106,15 @@ class MetaEpiModel:
         self.population = population
         self.seasonality = None
 
+        if rng is None:
+            rng = np.random.default_rng(seed)
+
+        self.rng = rng
+
         models = {}
 
         for state in travel_graph.index:
-            models[state] = EpiModel()
+            models[state] = EpiModel(rng=self.rng)
 
         self.models = models
         self.prototype = models[travel_graph.index[0]]
@@ -126,93 +137,72 @@ class MetaEpiModel:
     # ------------------------------------------------------------------
     # Model definition -- every call is forwarded to each sub-population
     # ------------------------------------------------------------------
-    def add_interaction(self, source: str, target: str, agent: str, rate: float) -> None:
+    def define_parameters(self, **kwargs) -> None:
+        """Define named parameters in every sub-population.
+
+        See :meth:`EpiModel.define_parameters`.
+        """
+        for model in self.models.values():
+            model.define_parameters(**kwargs)
+
+    @property
+    def params(self):
+        """Named parameters of the disease model (shared by every sub-population)."""
+        return self.prototype.params
+
+    def add_interaction(self, source: str, target: str, agent: str, rate=None, norm: bool = True, **rates) -> None:
         """Add an interaction transition to every sub-population.
 
         The transition is added to every :class:`~epidemik.EpiModel` managed
         by this metapopulation model -- the disease is assumed to be the
-        same everywhere.
-
-        Parameters
-        ----------
-        source : str
-            Name of the source compartment.
-        target : str
-            Name of the target compartment.
-        agent : str
-            Name of the agent compartment.
-        rate : float
-            Per-capita rate at which the interaction takes place.
+        same everywhere. See :meth:`EpiModel.add_interaction` for the
+        arguments.
         """
         for model in self.models.values():
-            model.add_interaction(source, target, agent, rate)
+            model.add_interaction(source, target, agent, rate, norm=norm, **rates)
 
-    def add_spontaneous(self, source: str, target: str, rate: float) -> None:
+    def add_spontaneous(self, source: str, target: str, rate=None, **rates) -> None:
         """Add a spontaneous transition to every sub-population.
 
-        Parameters
-        ----------
-        source : str
-            Name of the source compartment.
-        target : str
-            Name of the target compartment.
-        rate : float
-            Per-capita rate at which the transition takes place.
+        See :meth:`EpiModel.add_spontaneous` for the arguments.
         """
         for model in self.models.values():
-            model.add_spontaneous(source, target, rate)
+            model.add_spontaneous(source, target, rate, **rates)
 
-    def add_vaccination(self, source: str, target: str, rate: float, start: int) -> None:
+    def add_vaccination(self, source: str, target: str, rate=None, start: Union[int, None] = None, **rates) -> None:
         """Add a time-gated vaccination transition to every sub-population.
 
-        Parameters
-        ----------
-        source : str
-            Name of the source compartment.
-        target : str
-            Name of the target compartment.
-        rate : float
-            Per-capita vaccination rate.
-        start : int
-            Time step at which the vaccination campaign begins.
+        See :meth:`EpiModel.add_vaccination` for the arguments.
         """
         for model in self.models.values():
-            model.add_vaccination(source, target, rate, start)
+            model.add_vaccination(source, target, rate, start=start, **rates)
 
-    def add_birth_rate(self, rate: float, comps: Union[List, None] = None, from_group: bool = False) -> None:
+    def add_viral_generation(self, source: str, target: str, source_rate=None, target_rate=None, **rates) -> None:
+        """Add a viral generation transition to every sub-population.
+
+        See :meth:`EpiModel.add_viral_generation` for the arguments.
+        """
+        for model in self.models.values():
+            model.add_viral_generation(source, target, source_rate, target_rate, **rates)
+
+    def add_birth_rate(self, rate=None, comps: Union[List, None] = None, fixed: bool = False,
+                       global_rate: bool = True, from_group: bool = False, **rates) -> None:
         """Attach a birth rate to one or more compartments in every sub-population.
 
-        See :meth:`EpiModel.add_birth_rate` for the semantics.
-
-        Parameters
-        ----------
-        rate : float
-            Birth rate.
-        comps : list, optional
-            Compartments to which to assign this birth rate. If ``None``
-            (the default) the rate is applied to every compartment.
-        from_group : bool, default=False
-            Whether the inflow is proportional to the group total rather
-            than to the compartment itself (requires :meth:`add_groups`).
+        See :meth:`EpiModel.add_birth_rate` for the arguments.
         """
         for model in self.models.values():
-            model.add_birth_rate(rate, comps=comps, from_group=from_group)
+            model.add_birth_rate(rate, comps=comps, fixed=fixed, global_rate=global_rate,
+                                 from_group=from_group, **rates)
 
-    def add_death_rate(self, rate: float, comps: Union[List, None] = None) -> None:
+    def add_death_rate(self, rate=None, comps: Union[List, None] = None, fixed: bool = False,
+                       global_rate: bool = False, **rates) -> None:
         """Attach a death rate to one or more compartments in every sub-population.
 
-        See :meth:`EpiModel.add_death_rate` for the semantics.
-
-        Parameters
-        ----------
-        rate : float
-            Per-capita death rate.
-        comps : list, optional
-            Compartments to which to assign this death rate. If ``None``
-            (the default) the rate is applied to every compartment.
+        See :meth:`EpiModel.add_death_rate` for the arguments.
         """
         for model in self.models.values():
-            model.add_death_rate(rate, comps=comps)
+            model.add_death_rate(rate, comps=comps, fixed=fixed, global_rate=global_rate, **rates)
 
     def add_groups(self, groups: Dict[str, List[str]]) -> None:
         """Declare compartment groups (e.g. host/vector) in every sub-population.
@@ -296,7 +286,7 @@ class MetaEpiModel:
 
             for i in range(len(states)):
                 if counts[i] > 0:
-                    arrivals += np.random.multinomial(counts[i], probabilities[i])
+                    arrivals += self.rng.multinomial(counts[i], probabilities[i])
 
             new_compartments[comp] = arrivals
 
@@ -349,8 +339,9 @@ class MetaEpiModel:
         NotInitialized
             If ``seed_state`` is not provided.
         ValueError
-            If ``seed_state`` is not a known sub-population, or if
-            ``susceptible`` is not a compartment of the model.
+            If ``seed_state`` is not a known sub-population, if
+            ``susceptible`` is not a compartment of the model, or if the
+            seeds exceed the population of ``seed_state``.
         """
         if 'timestamp' in kwargs:
             warnings.warn(
@@ -380,6 +371,10 @@ class MetaEpiModel:
         self.seasonality = seasonality
         self._initialize_populations(susceptible)
 
+        # Every call starts a fresh simulation in each sub-population
+        for model in self.models.values():
+            model.reset()
+
         for comp, value in kwargs.items():
             if comp == susceptible:
                 continue
@@ -393,6 +388,12 @@ class MetaEpiModel:
 
             self.compartments_.loc[seed_state, comp] += value
             self.compartments_.loc[seed_state, susceptible] -= value
+
+        if self.compartments_.loc[seed_state, susceptible] < 0:
+            raise ValueError(
+                "The initial seeds exceed the population of '%s' (%u)."
+                % (seed_state, self.populations.loc[seed_state, self.population])
+            )
 
         for t in tqdm(range(t_min, t_min+timesteps), total=timesteps):
             self._run_spread(t_min)
