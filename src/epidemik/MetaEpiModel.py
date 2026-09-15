@@ -18,20 +18,33 @@ from tqdm import tqdm
 tqdm.pandas()
 
 class MetaEpiModel:
-    """Simple Epidemic Model Implementation
-    
-        Provides a way to implement and numerically integrate 
+    """Metapopulation compartmental epidemic model.
+
+    A :class:`MetaEpiModel` is a collection of independent
+    :class:`~epidemik.EpiModel` instances -- one per sub-population --
+    coupled together by a travel matrix. At every simulation step each
+    sub-population is advanced by one stochastic time step, after which
+    individuals move between sub-populations according to the travel
+    probabilities. The same disease model is shared across every
+    sub-population.
     """
+
     def __init__(self, travel_graph: pd.DataFrame, populations: pd.DataFrame, population: str ='Population'):
-        """
-        Initialize the EpiModel object
-        
-        Parameters:
-        - compartments_: list of strings, optional
-            List of compartment names
-        
-        Returns:
-        None
+        """Initialize a metapopulation model.
+
+        Parameters
+        ----------
+        travel_graph : pandas.DataFrame
+            Square data frame indexed and columned by sub-population labels.
+            Entry ``(i, j)`` is the probability that an individual currently
+            in sub-population ``i`` travels to sub-population ``j`` during
+            a single time step. Each row should sum to 1.
+        populations : pandas.DataFrame
+            Data frame indexed by sub-population label containing at least
+            one column with the total population of each sub-population.
+        population : str, default='Population'
+            Name of the column in ``populations`` that holds the population
+            counts.
         """
         self.travel_graph = travel_graph
         self.populations = populations
@@ -52,12 +65,13 @@ class MetaEpiModel:
         self.models = models
 
     def __repr__(self) -> str:
-        """
-        Return a string representation of the EpiModel object
-        
-        Returns:
-        string
-            String representation of the EpiModel object
+        """Return a human-readable description of the metapopulation model.
+
+        Returns
+        -------
+        str
+            Multi-line string describing the number of sub-populations and
+            the underlying disease model.
         """
 
         model_text = self.models[self.travel_graph.index[0]]
@@ -65,77 +79,103 @@ class MetaEpiModel:
         text = "Metapopulation model with %u populations\n\nThe disease is defined by an %s" % (self.travel_graph.shape[0], model_text)
         return text 
 
-    def add_interaction(self, source: str, target: str, agent: str, rate: float) -> None:  
+    def add_interaction(self, source: str, target: str, agent: str, rate: float) -> None:
+        """Add an interaction transition to every sub-population.
+
+        The transition is added to every :class:`~epidemik.EpiModel` managed
+        by this metapopulation model -- the disease is assumed to be the
+        same everywhere.
+
+        Parameters
+        ----------
+        source : str
+            Name of the source compartment.
+        target : str
+            Name of the target compartment.
+        agent : str
+            Name of the agent compartment.
+        rate : float
+            Per-capita rate at which the interaction takes place.
         """
-        Add an interaction between two compartments_
-        
-        Parameters:
-        - source: string
-            Name of the source compartment
-        - target: string
-            Name of the target compartment
-        - agent: string
-            Name of the agent
-        - rate: float
-            Rate of the interaction
-        
-        Returns:
-        None
-        """    
         for state in self.models:  
             self.models[state].add_interaction(source, target, agent, rate)       
-        
+
     def add_spontaneous(self, source: str, target: str, rate: float) -> None:
-        """
-        Add a spontaneous transition between two compartments_
-        
-        Parameters:
-        - source: string
-            Name of the source compartment
-        - target: string
-            Name of the target compartment
-        - rate: float
-            Rate of the transition
-        
-        Returns:
-        None
+        """Add a spontaneous transition to every sub-population.
+
+        Parameters
+        ----------
+        source : str
+            Name of the source compartment.
+        target : str
+            Name of the target compartment.
+        rate : float
+            Per-capita rate at which the transition takes place.
         """
         for state in self.models:  
             self.models[state].add_spontaneous(source, target, rate)      
 
-    def add_vaccination(self, source: str, target: str, rate: float, start: int) -> None:
+    def add_groups(self, groups: Dict[str, List[str]]) -> None:
+        """Declare compartment groups (e.g. host/vector) in every sub-population.
+
+        Forwards to :meth:`EpiModel.add_groups` on every underlying
+        :class:`~epidemik.EpiModel`, so the same multi-group structure is
+        used everywhere. See :meth:`EpiModel.add_groups` for the semantics.
+
+        Parameters
+        ----------
+        groups : dict of str -> list of str
+            Mapping from group name to the list of compartments in that
+            group.
         """
-        Add a vaccination transition between two compartments_
-        
-        Parameters:
-        - source: string
-            Name of the source compartment
-        - target: string
-            Name of the target compartment
-        - rate: float
-            Rate of the vaccination
-        - start: int
-            Start time of the vaccination
-        
-        Returns:
-        None
+        for state in self.models:
+            self.models[state].add_groups(groups)
+
+    def add_vaccination(self, source: str, target: str, rate: float, start: int) -> None:
+        """Add a time-gated vaccination transition to every sub-population.
+
+        Parameters
+        ----------
+        source : str
+            Name of the source compartment.
+        target : str
+            Name of the target compartment.
+        rate : float
+            Per-capita vaccination rate.
+        start : int
+            Time step at which the vaccination campaign begins.
         """
         for state in self.models:  
             self.models[state].add_vaccination(source, target, rate, start)
-    
+
     def R0(self) -> Union[float, None]:
+        """Compute the basic reproduction number of the underlying disease.
+
+        Since every sub-population shares the same disease model, the
+        :math:`R_0` of the metapopulation model is simply the :math:`R_0`
+        of any individual sub-population.
+
+        Returns
+        -------
+        float or None
+            Basic reproduction number, or ``None`` if it cannot be computed.
+        """
         key = list(self.models.keys())[0]
         return self.models[key].R0()
 
     def get_state(self, state: str) -> EpiModel:
-        """
-        Return a reference to a state EpiModel object
+        """Return the :class:`~epidemik.EpiModel` for a given sub-population.
 
-        Parameters:
-        - state: string
-            Name of the state to return
-        """
+        Parameters
+        ----------
+        state : str
+            Label of the sub-population.
 
+        Returns
+        -------
+        EpiModel
+            The underlying :class:`~epidemik.EpiModel` driving ``state``.
+        """
         return self.models[state]
 
     def _initialize_populations(self, susceptible: str, population: Union[pd.DataFrame, None] =None) -> None:
@@ -181,6 +221,39 @@ class MetaEpiModel:
             seasonality=None, seed_state: [str, None] = None, 
             susceptible: str ='S', **kwargs
     ) -> None:
+        """Run a coupled stochastic simulation across every sub-population.
+
+        Each time step alternates between an *epidemic* phase (every
+        sub-population advances by one step of its own
+        :class:`~epidemik.EpiModel`) and a *travel* phase (individuals are
+        redistributed across sub-populations according to
+        :attr:`travel_graph`). The initial epidemic seed is placed in
+        ``seed_state``.
+
+        Parameters
+        ----------
+        timestamp : int
+            Number of time steps to simulate.
+        t_min : int, default=1
+            Starting time of the simulation.
+        seasonality : numpy.ndarray, optional
+            Optional seasonality vector, forwarded to every sub-population.
+        seed_state : str
+            Label of the sub-population where the epidemic seeds are placed.
+            Must be provided.
+        susceptible : str, default='S'
+            Name of the compartment representing susceptible individuals.
+        **kwargs
+            Initial size of each non-susceptible compartment in
+            ``seed_state`` (e.g. ``I=10``). The susceptible compartment is
+            adjusted automatically so that the total population of
+            ``seed_state`` remains unchanged.
+
+        Raises
+        ------
+        NotInitialized
+            If ``seed_state`` is not provided.
+        """
         if seed_state is None:
             raise NotInitialized("You have to specify the seed_state")
 
@@ -198,12 +271,48 @@ class MetaEpiModel:
             self.compartments_ = self._run_travel(self.compartments_, self.travel_graph)
     
     def integrate(self, **kwargs):
+        """Not supported for metapopulation models.
+
+        Raises
+        ------
+        NotImplementedError
+            Always. Metapopulation models can only be explored via
+            :meth:`simulate`.
+        """
         raise NotImplementedError("MetaEpiModel doesn't support direct integration of the ODE")
 
     def draw_model(self) -> None:
+        """Draw the underlying disease model.
+
+        Delegates to :meth:`EpiModel.draw_model` on the first
+        sub-population's model, since every sub-population shares the same
+        disease.
+        """
         return self.models.iloc[0].draw_model()
 
     def plot(self, title: Union[str, None] = None, normed: bool = True, layout=None, **kwargs) -> None:
+        """Plot the infection time series for every sub-population.
+
+        Each sub-population is rendered as a small panel whose position is
+        given by ``layout`` (or by an automatic square layout if
+        ``layout`` is omitted). The colour of each panel encodes the time
+        at which the epidemic peaks locally.
+
+        Parameters
+        ----------
+        title : str, optional
+            Currently unused, kept for API symmetry with
+            :meth:`EpiModel.plot`.
+        normed : bool, default=True
+            Currently unused, kept for API symmetry with
+            :meth:`EpiModel.plot`.
+        layout : pandas.DataFrame, optional
+            Optional layout with columns ``x`` and ``y`` indexed by
+            sub-population label, providing the on-screen position of every
+            panel. If omitted, an automatic grid layout is generated.
+        **kwargs
+            Reserved for future use.
+        """
         if layout is None:
             n_pop = self.travel_graph.shape[0]
             N = int(np.round(np.sqrt(n_pop), 0)+1)
@@ -278,6 +387,13 @@ class MetaEpiModel:
         fig.tight_layout()
 
     def plot_peaks(self) -> None:
+        """Render a heat-map of the infection peak across sub-populations.
+
+        For every sub-population, the time series of the ``I`` compartment
+        is normalized by its maximum value and stacked vertically into a
+        heat-map. The result highlights how the epidemic peak diffuses
+        across sub-populations over time.
+        """
         peaks = None
 
         for state in self.models.values():
