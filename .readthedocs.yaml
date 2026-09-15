@@ -10,10 +10,6 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.12"
-    # You can also specify other tool versions:
-    # nodejs: "19"
-    # rust: "1.64"
-    # golang: "1.19"
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:
@@ -24,9 +20,10 @@ formats:
    - pdf
    - epub
 
-# Optional but recommended, declare the Python requirements required
-# to build your documentation
-# See https://docs.readthedocs.io/en/stable/guides/reproducible-builds.html
+# Install the documentation requirements and the package itself (from the
+# checked-out source, so autodoc documents exactly this revision).
 python:
    install:
    - requirements: docs/requirements.txt
+   - method: pip
+     path: .

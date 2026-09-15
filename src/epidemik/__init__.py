@@ -29,4 +29,4 @@ from . import utils
 
 __all__ = ["EpiModel", "NetworkEpiModel", "MetaEpiModel", "utils"]
 
-__version__ = "0.1"
+__version__ = "0.2.0"

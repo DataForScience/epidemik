@@ -3,16 +3,15 @@
 # @author Bruno Goncalves
 ######################################################
 
-from typing import Union
-import networkx as nx
+from typing import Dict, Union
+import warnings
+
 import numpy as np
-from numpy import linalg
 from numpy import random
 import pandas as pd
-import matplotlib.pyplot as plt
+
 from .EpiModel import EpiModel
-from collections import Counter
-from .utils import *
+
 
 class NetworkEpiModel(EpiModel):
     """Compartmental epidemic model that lives on a contact network.
@@ -23,6 +22,19 @@ class NetworkEpiModel(EpiModel):
     :class:`networkx.Graph`. Only stochastic simulation is supported --
     numerical integration of the corresponding ODEs is not meaningful in
     this setting.
+
+    Attributes
+    ----------
+    network : networkx.Graph
+        The contact network.
+    kavg_ : float
+        Average degree of the contact network.
+    population_ : pandas.DataFrame
+        State of every node at every time step (one column per node),
+        available after :meth:`simulate`.
+    values_ : pandas.DataFrame
+        Number of nodes in each compartment at every time step, available
+        after :meth:`simulate`.
     """
 
     def __init__(self, network, compartments=None):
@@ -33,7 +45,7 @@ class NetworkEpiModel(EpiModel):
         network : networkx.Graph
             Contact network over which the epidemic will spread. Nodes
             represent individuals and edges represent contacts that can
-            transmit the disease.
+            transmit the disease. Node labels can be of any hashable type.
         compartments : list of str, optional
             Optional list of compartment names. Just like in
             :class:`~epidemik.EpiModel`, compartments are also added
@@ -41,11 +53,14 @@ class NetworkEpiModel(EpiModel):
         """
         super(NetworkEpiModel, self).__init__(compartments)
         self.network = network
-        self.kavg_ = 2*network.number_of_edges()/network.number_of_nodes() 
+
+        n_nodes = network.number_of_nodes()
+        self.kavg_ = 2*network.number_of_edges()/n_nodes if n_nodes > 0 else 0.0
+
         self.spontaneous = {}
         self.interactions = {}
 
-    def integrate(self, timesteps, **kwargs):
+    def integrate(self, *args, **kwargs):
         """Not supported for network models.
 
         Raises
@@ -68,7 +83,7 @@ class NetworkEpiModel(EpiModel):
         agent : str
             Name of the agent compartment driving the interaction.
         rate : float
-            Per-contact transmission rate.
+            Per-contact transmission probability per time step.
         rescale : bool, default=False
             If True, divide ``rate`` by the average degree of the underlying
             network. This is useful when porting a mean-field rate to a
@@ -79,13 +94,7 @@ class NetworkEpiModel(EpiModel):
 
         super(NetworkEpiModel, self).add_interaction(source, target, agent=agent, rate=rate)
 
-        if source not in self.interactions:
-            self.interactions[source] = {}
-
-        if target not in self.interactions[source]:
-            self.interactions[source] = {}
-
-        self.interactions[source][agent] = {'target': target, 'rate': rate}
+        self.interactions.setdefault(source, {})[agent] = {'target': target, 'rate': rate}
 
     def add_spontaneous(self, source: str, target: str, rate: float) -> None:
         """Add a spontaneous transition between two compartments.
@@ -97,63 +106,98 @@ class NetworkEpiModel(EpiModel):
         target : str
             Name of the target compartment.
         rate : float
-            Per-individual transition rate.
+            Per-individual transition probability per time step.
         """
         super(NetworkEpiModel, self).add_spontaneous(source, target, rate=rate)
-        if source not in self.spontaneous:
-            self.spontaneous[source] = {}
 
-        if target not in self.spontaneous[source]:
-            self.spontaneous[source] = {}
+        self.spontaneous.setdefault(source, {})[target] = rate
 
-        self.spontaneous[source][target] = rate
-
-
-    def simulate(self, timesteps: int, seeds, **kwargs) -> None:
+    def simulate(self, timesteps: int, seeds: Dict, t_min: int = 1, susceptible: Union[str, None] = None, **kwargs) -> None:
         """Run a discrete-time stochastic simulation on the network.
 
-        At every time step each infected node attempts to infect its
+        At every time step each active node attempts to infect its
         neighbours and may also undergo spontaneous transitions. The
         per-node state trajectory is stored in :attr:`population_` and the
         aggregate compartment counts over time are stored in
-        :attr:`values_`.
+        :attr:`values_`. In both data frames the first row (``t_min``)
+        holds the initial conditions.
 
         Parameters
         ----------
         timesteps : int
-            Number of time steps to simulate.
+            Number of time steps (rows) to produce, including the initial
+            condition.
         seeds : dict
-            Mapping ``{node_id: compartment_name}`` that sets the initial
+            Mapping ``{node_label: compartment_name}`` that sets the initial
             state of a subset of network nodes. All other nodes are placed
             in the susceptible compartment.
+        t_min : int, default=1
+            Time label of the first row of :attr:`population_` and
+            :attr:`values_`.
+        susceptible : str, optional
+            Name of the susceptible compartment. If omitted, the compartment
+            without incoming transitions is used (as for
+            :class:`~epidemik.EpiModel`).
         **kwargs
             Reserved for future use; currently ignored.
+
+        Raises
+        ------
+        ValueError
+            If a seed node is not part of the network, if a seed state is
+            not a compartment of the model, or if the susceptible
+            compartment cannot be determined.
+
+        Warns
+        -----
+        UserWarning
+            If the spontaneous transition probabilities out of a
+            compartment sum to more than 1 (they are renormalized).
         """
         pos = {comp: i for i, comp in enumerate(self.transitions.nodes())}
-        N = self.network.number_of_nodes()
+        comps = list(pos)
 
-        population = np.zeros((timesteps, N), dtype='str')
+        nodes = list(self.network.nodes())
+        node_index = {node: i for i, node in enumerate(nodes)}
+        N = len(nodes)
 
-        comps = list(self.transitions.nodes)
-        time = np.arange(1, timesteps, 1, dtype='int')
+        if susceptible is None:
+            candidates = self._get_susceptible()
 
-        susceptible = self._get_susceptible().pop()
+            if len(candidates) == 0:
+                raise ValueError(
+                    "Unable to determine the susceptible compartment; "
+                    "pass it explicitly with susceptible=..."
+                )
 
-        active_nodes = set()
-        current_active = set()
+            susceptible = sorted(candidates)[0]
+        elif susceptible not in pos:
+            raise ValueError("'%s' is not a compartment of the model." % susceptible)
+
+        population = np.empty((timesteps, N), dtype=object)
+        population[0, :] = susceptible
+
         active_states = self._get_active()
+        active_nodes = set()
 
-        for node in range(N):
-            if node in seeds:
-                population[0, node] = seeds[node]
-                active_nodes.add(node)
-            else:
-                population[0, node] = susceptible
+        for node, state in seeds.items():
+            if node not in node_index:
+                raise ValueError("Seed node %r is not part of the network." % (node,))
+
+            if state not in pos:
+                raise ValueError("Seed state '%s' is not a compartment of the model." % state)
+
+            i = node_index[node]
+            population[0, i] = state
+
+            if state in active_states:
+                active_nodes.add(i)
 
         infections = self._get_infections()
+        warned = False
 
-        for t in time:
-            population[t] = np.copy(population[t-1])
+        for t in range(1, timesteps):
+            population[t] = population[t-1]
 
             if len(active_nodes) == 0:
                 continue
@@ -166,61 +210,80 @@ class NetworkEpiModel(EpiModel):
 
                 if state_i in infections:
                     # contact each neighbour to see if we infect them
-                    NN = list(self.network.neighbors(node_i))
+                    NN = [node_index[n] for n in self.network.neighbors(nodes[node_i])]
                     np.random.shuffle(NN)
 
                     for node_j in NN:
                         state_j = population[t-1, node_j]
 
                         if state_j in infections[state_i]:
-                            prob = np.random.random()
-
-                            if prob < infections[state_i][state_j]['rate']:
+                            if np.random.random() < infections[state_i][state_j]['rate']:
                                 new_state = infections[state_i][state_j]['target']
                                 population[t, node_j] = new_state
 
                                 if new_state in active_states:
                                     active_nodes.add(node_j)
- 
-                if state_i in self.spontaneous:
-                    n_trans = len(self.spontaneous[state_i])
 
+                if state_i in self.spontaneous:
                     prob = np.zeros(len(pos))
 
-                    for target in self.spontaneous[state_i]:
-                        prob[pos[target]] = self.spontaneous[state_i][target]
+                    for target, rate in self.spontaneous[state_i].items():
+                        prob[pos[target]] += rate
 
-                    prob[pos[state_i]] = 1-np.sum(prob)
+                    total = prob.sum()
+
+                    if total > 1:
+                        if not warned:
+                            warnings.warn(
+                                "The spontaneous transition probabilities out of '%s' sum "
+                                "to more than 1; they were renormalized." % state_i,
+                                stacklevel=2
+                            )
+                            warned = True
+
+                        prob /= total
+                        total = 1.0
+
+                    prob[pos[state_i]] = max(0.0, 1.0-total)
 
                     new_state = comps[np.argmax(random.multinomial(1, prob))]
 
                     if new_state != state_i:
                         population[t, node_i] = new_state
-                        
-                        active_nodes.add(node_i)
 
-                        if new_state not in active_states:
-                            active_nodes.remove(node_i)
-                        
-                        continue
+                        if new_state in active_states:
+                            active_nodes.add(node_i)
+                        else:
+                            active_nodes.discard(node_i)
 
+        time = np.arange(t_min, t_min+timesteps, 1, dtype='int')
 
-        self.population_ = pd.DataFrame(population)
-        self.values_ = pd.DataFrame.from_records(self.population_.apply(lambda x: Counter(x), axis=1)).fillna(0).astype('int')
+        self.population_ = pd.DataFrame(population, index=time, columns=nodes)
+
+        counts = np.zeros((timesteps, len(comps)), dtype='int')
+
+        for k, comp in enumerate(comps):
+            counts[:, k] = (population == comp).sum(axis=1)
+
+        self.values_ = pd.DataFrame(counts, index=time, columns=comps)
 
     def R0(self) -> Union[float, None]:
         """Compute the network-corrected basic reproduction number.
 
-        The underlying mean-field :math:`R_0` (computed by the parent class)
-        is multiplied by the average degree of the contact network to
-        account for the limited number of contacts each individual has.
+        The underlying mean-field :math:`R_0` (computed by
+        :meth:`EpiModel.R0`) is multiplied by the average degree of the
+        contact network, since each infected node only has :math:`\\langle k
+        \\rangle` contacts on average.
 
         Returns
         -------
         float or None
-            Network :math:`R_0`, or ``None`` if no recovered compartment
-            (``"R"``) is defined.
+            Network :math:`R_0` rounded to two decimals, or ``None`` if the
+            mean-field :math:`R_0` cannot be computed.
         """
-        if 'R' not in set(self.transitions.nodes):
+        r0 = super(NetworkEpiModel, self).R0()
+
+        if r0 is None:
             return None
-        return np.round(super(NetworkEpiModel, self).R0()*self.kavg_, 2)
+
+        return float(np.round(r0*self.kavg_, 2))

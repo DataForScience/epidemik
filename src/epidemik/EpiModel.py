@@ -15,7 +15,8 @@ import scipy.integrate
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from .utils import *
+from .utils import NotInitialized, epi_colors
+
 
 class EpiModel(object):
     """Compartmental epidemic model on a homogeneously mixed population.
@@ -28,6 +29,18 @@ class EpiModel(object):
     dynamics can be explored deterministically with :meth:`integrate` (which
     numerically solves the corresponding ODEs) or stochastically with
     :meth:`simulate`.
+
+    Attributes
+    ----------
+    transitions : networkx.MultiDiGraph
+        Graph of compartments (nodes) and transitions (edges).
+    values_ : pandas.DataFrame
+        Trajectory of every compartment, indexed by time. Only available
+        after :meth:`integrate` or :meth:`simulate` has been called.
+    values_ages_ : pandas.DataFrame
+        Age-stratified trajectory (one column per ``compartment_age``
+        pair). Only available after :meth:`add_age_structure` and a call
+        to :meth:`integrate` or :meth:`simulate`.
     """
 
     def __init__(self, compartments=None):
@@ -44,6 +57,7 @@ class EpiModel(object):
         self.transitions = nx.MultiDiGraph()
         self.seasonality = None
         self.population = None
+        self.contact = None
         self.orig_comps = None
         self.demographics = False
         self.groups = None
@@ -51,12 +65,19 @@ class EpiModel(object):
 
         if compartments is not None:
             self.transitions.add_nodes_from([comp for comp in compartments])
-    
+
+    # ------------------------------------------------------------------
+    # Model definition
+    # ------------------------------------------------------------------
     def add_interaction(self, source: str, target: str, agent: str, rate: float) -> None:
         """Add an interaction transition between two compartments.
 
         Encodes a reaction of the form ``source + agent -> target + agent``
-        that occurs with the given per-capita rate.
+        that occurs with the given per-capita rate. In the mean-field
+        equations the contribution of this transition is
+        ``rate * source * agent / N`` where ``N`` is the total population
+        (or the population of the agent's group/age stratum -- see
+        :meth:`add_groups` and :meth:`add_age_structure`).
 
         Parameters
         ----------
@@ -119,6 +140,13 @@ class EpiModel(object):
         ValueError
             If ``from_group=True`` but :meth:`add_groups` has not been
             called yet.
+
+        Notes
+        -----
+        When combined with :meth:`add_age_structure`, birth and death
+        rates attached *before* the age structure is added are copied to
+        every age stratum of the compartment. Rates added *after* must use
+        the expanded compartment names (``"S_a"``, ``"S_b"``, ...).
         """
         if from_group and self.groups is None:
             raise ValueError(
@@ -129,9 +157,10 @@ class EpiModel(object):
         self.demographics = True
 
         if comps is None:
-            comps = self.transitions.nodes()
+            comps = list(self.transitions.nodes())
 
         for comp in comps:
+            self.transitions.add_node(comp)
             self.transitions.nodes[comp]['birth'] = rate
             self.transitions.nodes[comp]['birth_from_group'] = from_group
 
@@ -149,10 +178,11 @@ class EpiModel(object):
         self.demographics = True
 
         if comps is None:
-            comps = self.transitions.nodes()
+            comps = list(self.transitions.nodes())
 
         for comp in comps:
-            self.transitions.nodes[comp]['death']=rate
+            self.transitions.add_node(comp)
+            self.transitions.nodes[comp]['death'] = rate
 
     def add_vaccination(self, source: str, target: str, rate: float, start: int) -> None:
         """Add a time-gated vaccination transition between two compartments.
@@ -173,14 +203,16 @@ class EpiModel(object):
         """
         self.transitions.add_edge(source, target, rate=rate, start=start)
 
-    def add_age_structure(self, matrix: List, population: List) -> List[List]:
+    def add_age_structure(self, matrix: List, population: List) -> None:
         """Expand the model into an age-structured version.
 
         Every compartment ``X`` is replicated into one compartment per age
         group ``X_a``, ``X_b``, ... and the interactions are rescaled by the
         provided contact matrix. The ``population`` argument provides the
         absolute size of each age group, which is used by :meth:`integrate`
-        to split the initial population across age strata.
+        and :meth:`simulate` to split the initial population across age
+        strata. Any birth or death rates already attached to a compartment
+        are copied to every one of its age strata.
 
         Parameters
         ----------
@@ -196,7 +228,8 @@ class EpiModel(object):
         ------
         ValueError
             If the model is already in multi-group (vector-borne) mode via
-            :meth:`add_groups`.
+            :meth:`add_groups`, if ``matrix`` is not square, or if
+            ``population`` does not have one entry per age group.
         """
         if self.groups is not None:
             raise ValueError(
@@ -204,16 +237,35 @@ class EpiModel(object):
                 "Use one or the other."
             )
 
-        self.contact = np.asarray(matrix)
-        self.population = np.asarray(population).flatten()
+        contact = np.asarray(matrix, dtype=float)
+        population = np.asarray(population, dtype=float).flatten()
 
-        assert self.contact.shape[0] == self.contact.shape[1], "The contact matrix must be square." 
+        if contact.ndim != 2 or contact.shape[0] != contact.shape[1]:
+            raise ValueError("The contact matrix must be square.")
 
-        age_groups = list(string.ascii_lowercase[:len(matrix)])
-        n_ages = len(age_groups)
+        if population.shape[0] != contact.shape[0]:
+            raise ValueError(
+                "population must have one entry per age group "
+                "(%u given, %u expected)." % (population.shape[0], contact.shape[0])
+            )
+
+        if contact.shape[0] > len(string.ascii_lowercase):
+            raise ValueError("At most %u age groups are supported." % len(string.ascii_lowercase))
+
+        self.contact = contact
+        self.population = population
+
+        age_groups = list(string.ascii_lowercase[:contact.shape[0]])
 
         model = EpiModel()
         self.orig_comps = list(self.transitions.nodes())
+
+        # Create the expanded compartments first so that the ordering is
+        # predictable (S_a, S_b, ..., I_a, I_b, ...) and copy over any
+        # demographic attributes attached to the original compartments.
+        for comp, data in self.transitions.nodes(data=True):
+            for age in age_groups:
+                model.transitions.add_node(comp + '_' + age, **data)
 
         for node_i, node_j, data in self.transitions.edges(data=True):
             # Interacting transition
@@ -242,7 +294,7 @@ class EpiModel(object):
         self.transitions = model.transitions
 
     def add_groups(self, groups: Dict[str, List[str]]) -> None:
-        """Partition compartments into named sub-populations (groups).
+        r"""Partition compartments into named sub-populations (groups).
 
         When groups are declared the model becomes a *multi-group* (e.g.
         vector-borne) model: cross-group interactions normalize the force
@@ -251,15 +303,15 @@ class EpiModel(object):
 
         .. math::
 
-           X + A \\to Y + A
+           X + A \to Y + A
 
         contributes
 
         .. math::
 
-           \\text{rate} \\cdot X \\cdot \\frac{A}{N_{\\text{group}(A)}}
+           \text{rate} \cdot X \cdot \frac{A}{N_{\text{group}(A)}}
 
-        to the dynamics, where :math:`N_{\\text{group}(A)}` is the total
+        to the dynamics, where :math:`N_{\text{group}(A)}` is the total
         population of the group that contains the agent compartment ``A``.
         This recovers the standard host-vector SIR dynamics where, for
         example, susceptible hosts become infected at rate
@@ -272,7 +324,9 @@ class EpiModel(object):
             Mapping from group name (e.g. ``"host"``, ``"vector"``) to the
             list of compartment names that belong to that group. Every
             compartment present in the model must appear in exactly one
-            group.
+            group. Compartments added *after* this call must also belong
+            to a group; :meth:`integrate` and :meth:`simulate` check this
+            and raise :class:`ValueError` otherwise.
 
         Raises
         ------
@@ -319,19 +373,144 @@ class EpiModel(object):
         self.groups = {name: list(comps) for name, comps in groups.items()}
         self.comp_to_group = comp_to_group
 
+    # ------------------------------------------------------------------
+    # Internal helpers shared by integrate() and simulate()
+    # ------------------------------------------------------------------
+    def _check_groups(self, pos: Dict) -> None:
+        """Verify that every compartment belongs to a group (if groups are used)."""
+        if self.groups is None:
+            return
+
+        missing = set(pos) - set(self.comp_to_group)
+        if missing:
+            raise ValueError(
+                "The following compartments are not assigned to any group: %s. "
+                "Call add_groups again after adding new compartments."
+                % sorted(missing)
+            )
+
     def _group_populations(self, population: np.ndarray, pos: Dict) -> Dict[str, float]:
         """Compute the per-compartment effective population.
 
-        Internal helper used by :meth:`_new_cases` and :meth:`simulate` when
-        the model has been put in multi-group mode via :meth:`add_groups`.
-        Returns a mapping ``comp -> N_group(comp)``: the total population of
-        the group that contains ``comp``.
+        Internal helper used when the model has been put in multi-group
+        mode via :meth:`add_groups`. Returns a mapping
+        ``comp -> N_group(comp)``: the total population of the group that
+        contains ``comp``.
         """
         group_totals = {
             name: sum(population[pos[c]] for c in comps if c in pos)
             for name, comps in self.groups.items()
         }
         return {comp: group_totals[grp] for comp, grp in self.comp_to_group.items()}
+
+    def _effective_populations(self, population: np.ndarray, pos: Dict):
+        """Return the population used to normalize interaction terms.
+
+        Returns a scalar (the total population) for plain models, or a
+        ``comp -> N`` mapping for age-structured and multi-group models,
+        where ``N`` is the population of the age stratum / group that
+        contains ``comp``.
+        """
+        if self.population is not None:
+            totals = {}
+
+            for comp in pos:
+                age = comp.split('_')[-1]
+                totals[age] = totals.get(age, 0) + population[pos[comp]]
+
+            return {comp: totals[comp.split('_')[-1]] for comp in pos}
+        elif self.groups is not None:
+            return self._group_populations(population, pos)
+
+        return np.sum(population)
+
+    def _transition_rate(self, data: Dict, population: np.ndarray, pos: Dict, N, time: float):
+        """Return the effective per-capita rate of a transition at ``time``.
+
+        Returns ``None`` when the transition is not active yet (e.g. a
+        vaccination campaign that has not started).
+        """
+        if 'start' in data and data['start'] >= time:
+            return None
+
+        rate = data['rate']
+
+        if 'agent' in data:
+            agent = data['agent']
+            n = N[agent] if isinstance(N, dict) else N
+
+            if n <= 0:
+                return 0.0
+
+            rate *= population[pos[agent]]/n
+
+            if self.seasonality is not None:
+                curr_t = int(time) % 365
+                rate *= float(self.seasonality[curr_t])
+
+        return rate
+
+    def _initial_population(self, pos: Dict, kwargs: Dict, stochastic: bool) -> np.ndarray:
+        """Build the initial population vector from ``**kwargs``.
+
+        Unknown compartment names are ignored with a warning. In
+        age-structured mode, base compartment names (``"S"``) are split
+        across age strata proportionally to the population vector given to
+        :meth:`add_age_structure` (using a multinomial draw when
+        ``stochastic`` is True); expanded names (``"S_a"``) are used
+        directly.
+        """
+        population = np.zeros(len(pos))
+        unknown = []
+
+        if self.population is not None:
+            p = self.population/self.population.sum()
+            ages = string.ascii_lowercase[:len(p)]
+
+        for comp, value in kwargs.items():
+            if comp in pos:
+                population[pos[comp]] = value
+                continue
+
+            if self.population is None:
+                unknown.append(comp)
+                continue
+
+            comp_ages = [comp + '_' + age for age in ages]
+
+            if not any(comp_age in pos for comp_age in comp_ages):
+                unknown.append(comp)
+                continue
+
+            if stochastic:
+                n = np.random.multinomial(int(value), p)
+            else:
+                n = value*p
+
+            for i, comp_age in enumerate(comp_ages):
+                if comp_age in pos:
+                    population[pos[comp_age]] = n[i]
+
+        if unknown:
+            warnings.warn(
+                "Ignoring initial conditions for unknown compartment(s): %s"
+                % sorted(unknown), stacklevel=3
+            )
+
+        return population
+
+    def _store_results(self, values: pd.DataFrame) -> None:
+        """Store a trajectory in :attr:`values_` (and :attr:`values_ages_`)."""
+        if self.population is None:
+            self.values_ = values
+        else:
+            self.values_ages_ = values
+
+            totals = values.T.copy()
+            totals['key'] = ['_'.join(c.split('_')[:-1]) for c in totals.index]
+            totals = totals.groupby('key').sum().T
+            totals.columns.name = None
+            self.values_ = totals[self.orig_comps].copy()
 
     def _new_cases(self, population: np.ndarray, time: float, pos: Dict) -> np.ndarray:
         """Compute the right-hand side of the model ODE system.
@@ -353,45 +532,18 @@ class EpiModel(object):
             Array of derivatives -- one entry per compartment.
         """
         diff = np.zeros(len(pos))
-        N = np.sum(population)
+        N = self._effective_populations(population, pos)
 
-        if self.population is not None:
-            N = {}
+        for source, target, trans in self.transitions.edges(data=True):
+            rate = self._transition_rate(trans, population, pos, N, time)
 
-            for comp_i in self.transitions.nodes():
-                age_group = comp_i.split('_')[-1]
-
-                for comp_j in pos:
-                    if comp_j.endswith(age_group):
-                        N[comp_i] = N.get(comp_i, 0) + population[pos[comp_j]]
-        elif self.groups is not None:
-            N = self._group_populations(population, pos)
-
-        for edge in self.transitions.edges(data=True):
-            source = edge[0]
-            target = edge[1]
-            trans = edge[2]
-            
-            rate = trans['rate']*population[pos[source]]
-            
-            if 'start' in trans and trans['start'] >= time:
+            if rate is None:
                 continue
 
-            if 'agent' in trans:
-                agent = trans['agent']
+            flow = rate*population[pos[source]]
 
-                if isinstance(N, dict):
-                    rate *= population[pos[agent]]/N[agent]
-                else:
-                    rate *= population[pos[agent]]/N
-
-                if self.seasonality is not None:
-                    curr_t = int(time)%365
-                    season = float(self.seasonality[curr_t])
-                    rate *= season
-                
-            diff[pos[source]] -= rate
-            diff[pos[target]] += rate
+            diff[pos[source]] -= flow
+            diff[pos[target]] += flow
 
         # Population dynamics (once per RHS evaluation, not per edge)
         if self.demographics:
@@ -403,16 +555,17 @@ class EpiModel(object):
                         source_pop = N[comp]
                     else:
                         source_pop = population[comp_id]
-                    births = source_pop*data["birth"]
-                    diff[comp_id] += births
+                    diff[comp_id] += source_pop*data["birth"]
 
                 if "death" in data:
-                    deaths = population[comp_id]*data["death"]
-                    diff[comp_id] -= deaths
+                    diff[comp_id] -= population[comp_id]*data["death"]
 
         return diff
-    
-    def plot(self, title: Union[str, None]= None, normed: bool = True, show: bool = True, ax: Union[plt.Axes, None] = None, **kwargs):
+
+    # ------------------------------------------------------------------
+    # Results access
+    # ------------------------------------------------------------------
+    def plot(self, title: Union[str, None] = None, normed: bool = True, show: bool = True, ax: Union[plt.Axes, None] = None, **kwargs):
         """Plot the time evolution of every compartment.
 
         Must be called after :meth:`integrate` or :meth:`simulate`.
@@ -436,34 +589,39 @@ class EpiModel(object):
         -------
         matplotlib.axes.Axes
             The axes that were drawn on.
+
+        Raises
+        ------
+        NotInitialized
+            If neither :meth:`integrate` nor :meth:`simulate` has been
+            called yet.
         """
-        try:
-            if normed:
-                N = self.values_.iloc[0].sum()
-            else:
-                N = 1
-
-            if ax is None:
-                ax = plt.gca()
-
-            for comp in self.values_.columns:
-                (self.values_[comp]/N).plot(c=epi_colors[comp[0]], **kwargs)
-
-            ax.legend(self.values_.columns)
-            ax.set_xlabel('Time')
-            ax.set_ylabel('Population')
-            
-            if title is not None:
-                ax.set_title(title)
-            
-            if show:
-                plt.show()
-
-            return ax
-        except Exception as e:
-            print(e)
+        if 'values_' not in self.__dict__:
             raise NotInitialized('You must call integrate() or simulate() first')
-    
+
+        if normed:
+            N = self.values_.iloc[0].sum()
+        else:
+            N = 1
+
+        if ax is None:
+            ax = plt.gca()
+
+        for comp in self.values_.columns:
+            (self.values_[comp]/N).plot(ax=ax, c=epi_colors[comp[0]], label=comp, **kwargs)
+
+        ax.legend()
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Population')
+
+        if title is not None:
+            ax.set_title(title)
+
+        if show:
+            plt.show()
+
+        return ax
+
     def __getattr__(self, name: str) -> pd.Series:
         """Return the time series of a compartment as an attribute.
 
@@ -479,24 +637,80 @@ class EpiModel(object):
         -------
         pandas.Series
             Time series of the requested compartment.
+
+        Raises
+        ------
+        AttributeError
+            If the model has not been run yet, or if ``name`` is not a
+            compartment of the model.
         """
+        if name.startswith('__'):
+            raise AttributeError(name)
 
-        if 'values_' in self.__dict__:
-            return self.values_[name]
+        if 'values_' in self.__dict__ and name in self.__dict__['values_'].columns:
+            return self.__dict__['values_'][name]
+
+        raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
+
+    def __getitem__(self, key):
+        """Return one or several compartment trajectories by name.
+
+        Parameters
+        ----------
+        key : str or list of str
+            Name(s) of the compartment(s) of interest. When the model has
+            age structure, age-stratified compartments such as ``"S_a"`` are
+            also accepted.
+
+        Returns
+        -------
+        pandas.Series or pandas.DataFrame or None
+            Time series of the requested compartment(s), or ``None`` if no
+            matching compartment can be found.
+
+        Raises
+        ------
+        NotInitialized
+            If neither :meth:`integrate` nor :meth:`simulate` has been
+            called yet.
+        """
+        if 'values_' not in self.__dict__:
+            raise NotInitialized('You must call integrate() or simulate() first')
+
+        if isinstance(key, str):
+            keys = [key]
         else:
-            raise AttributeError("'EpiModel' object has no attribute '%s'" % name)
+            keys = list(key)
 
+        if all(k in self.values_.columns for k in keys):
+            return self.values_[key]
+
+        ages = self.__dict__.get('values_ages_')
+
+        if ages is not None and all(k in ages.columns for k in keys):
+            return ages[key]
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Dynamics
+    # ------------------------------------------------------------------
     def simulate(self, timesteps: int, t_min: int = 1, seasonality: Union[np.ndarray, None] = None, **kwargs) -> None:
         """Run a discrete-time stochastic simulation of the model.
 
         Each compartment transitions according to a multinomial draw at every
-        time step. Results are stored in the :attr:`values_` attribute as a
-        :class:`pandas.DataFrame` indexed by time.
+        time step, with per-step transition probabilities equal to the
+        corresponding rates. Results are stored in the :attr:`values_`
+        attribute as a :class:`pandas.DataFrame` indexed by time: the first
+        row (``t_min``) holds the initial conditions and the remaining
+        ``timesteps - 1`` rows hold the state after each step, mirroring
+        :meth:`integrate`.
 
         Parameters
         ----------
         timesteps : int
-            Number of time steps to simulate.
+            Number of time steps (rows of :attr:`values_`) to produce,
+            including the initial condition.
         t_min : int, default=1
             Starting time (used to align the index of :attr:`values_` and to
             evaluate any time-gated transitions, e.g. vaccination).
@@ -505,62 +719,68 @@ class EpiModel(object):
             at time ``t`` are multiplied by ``seasonality[t % 365]``.
         **kwargs
             Initial size of each compartment, passed as keyword arguments
-            (e.g. ``S=9990, I=10, R=0``).
+            (e.g. ``S=9990, I=10, R=0``). Unknown compartment names are
+            ignored with a warning. For age-structured models, values are
+            split across age strata with a multinomial draw.
+
+        Warns
+        -----
+        UserWarning
+            If, for some compartment, the sum of the outgoing transition
+            probabilities exceeds 1 at some time step. The probabilities are
+            renormalized so that every individual leaves the compartment;
+            consider using smaller rates (i.e. a finer time step).
         """
         pos = {comp: i for i, comp in enumerate(self.transitions.nodes())}
-        population=np.zeros(len(pos), dtype='int')
+        self._check_groups(pos)
 
-        for comp in kwargs:
-            population[pos[comp]] = kwargs[comp]
+        population = self._initial_population(pos, kwargs, stochastic=True).astype('int')
 
-        values = []
-        values.append(population)
-
-        comps = list(self.transitions.nodes)
+        comps = list(pos)
         time = np.arange(t_min, t_min+timesteps, 1, dtype='int')
 
         self.seasonality = seasonality
 
-        for t in time:
-            pop = values[-1]
-            new_pop = values[-1].copy()
+        values = [population]
+        warned = False
 
-            if self.groups is None:
-                N = np.sum(pop)
-            else:
-                N = self._group_populations(pop, pos)
+        for t in time[1:]:
+            pop = values[-1]
+            new_pop = pop.copy()
+
+            N = self._effective_populations(pop, pos)
 
             for comp in comps:
-                trans = list(self.transitions.edges(comp, data=True))             
+                source = pos[comp]
+
+                if pop[source] == 0:
+                    continue
 
                 prob = np.zeros(len(comps), dtype='float')
 
-                for _, node_j, data in trans:
-                    source = pos[comp]
-                    target = pos[node_j]
+                for _, node_j, data in self.transitions.edges(comp, data=True):
+                    rate = self._transition_rate(data, pop, pos, N, t)
 
-                    rate = data['rate']
-
-                    if 'start' in data and data['start'] >= t:
+                    if rate is None:
                         continue
 
-                    if 'agent' in data:
-                        agent_name = data['agent']
-                        agent = pos[agent_name]
+                    prob[pos[node_j]] += rate
 
-                        if isinstance(N, dict):
-                            rate *= pop[agent]/N[agent_name]
-                        else:
-                            rate *= pop[agent]/N
+                total = prob.sum()
 
-                        if self.seasonality is not None:
-                            curr_t = int(t)%365
-                            season = float(self.seasonality[curr_t])
-                            rate *= season
+                if total > 1:
+                    if not warned:
+                        warnings.warn(
+                            "The total transition probability out of '%s' exceeds 1 at "
+                            "t=%u; probabilities were renormalized. Consider using "
+                            "smaller rates." % (comp, t), stacklevel=2
+                        )
+                        warned = True
 
-                    prob[target] = rate
+                    prob /= total
+                    total = 1.0
 
-                prob[source] = 1-np.sum(prob)
+                prob[source] = max(0.0, 1.0-total)
 
                 delta = random.multinomial(pop[source], prob)
                 delta[source] = 0
@@ -571,9 +791,7 @@ class EpiModel(object):
                     continue
 
                 new_pop[source] -= changes
-
-                for i in range(len(delta)):
-                    new_pop[i] += delta[i]
+                new_pop += delta
 
             # Population dynamics
             if self.demographics:
@@ -595,16 +813,17 @@ class EpiModel(object):
             values.append(new_pop)
 
         values = np.array(values)
-        self.values_ = pd.DataFrame(values[1:], columns=comps, index=time)
-    
-    def integrate(self, timesteps: int , t_min: int = 1, seasonality: Union[np.ndarray, None] = None, **kwargs) -> None:
+        self._store_results(pd.DataFrame(values, columns=comps, index=time))
+
+    def integrate(self, timesteps: int, t_min: int = 1, seasonality: Union[np.ndarray, None] = None, **kwargs) -> None:
         """Numerically integrate the model's ODE system.
 
         Uses :func:`scipy.integrate.odeint` to advance the deterministic
         mean-field equations of the model. Results are stored in
-        :attr:`values_`; when an age structure has been declared via
+        :attr:`values_` (the first row, at ``t_min``, holds the initial
+        conditions); when an age structure has been declared via
         :meth:`add_age_structure`, the per-age-group trajectories are also
-        stored in ``values_ages_``.
+        stored in :attr:`values_ages_`.
 
         Parameters
         ----------
@@ -617,78 +836,72 @@ class EpiModel(object):
             :meth:`simulate` for details.
         **kwargs
             Initial size of each compartment, passed as keyword arguments
-            (e.g. ``S=9990, I=10, R=0``).
+            (e.g. ``S=9990, I=10, R=0``). Unknown compartment names are
+            ignored with a warning. For age-structured models, values are
+            split across age strata proportionally to the age group sizes.
         """
-
         pos = {comp: i for i, comp in enumerate(self.transitions.nodes())}
-        population=np.zeros(len(pos))
+        self._check_groups(pos)
 
-        for comp in kwargs:
-            if self.population is None:
-                if comp not in pos:
-                    continue
+        population = self._initial_population(pos, kwargs, stochastic=False)
 
-                population[pos[comp]] = kwargs[comp]
-            else:
-                total_pop = self.population.sum()
-                p = np.copy(self.population)/total_pop
-                n = np.random.multinomial(kwargs[comp], p, 1)[0]
-
-                for i, age in enumerate(string.ascii_lowercase[:len(p)]):
-                    comp_age = comp + '_' + age
-                    if comp_age not in pos:
-                        continue
-
-                    population[pos[comp_age]] = n[i]
-        
         time = np.arange(t_min, t_min+timesteps, 1)
 
         self.seasonality = seasonality
         values = pd.DataFrame(
                 scipy.integrate.odeint(
-                    self._new_cases, 
-                    population, 
-                    time, 
+                    self._new_cases,
+                    population,
+                    time,
                     args=(pos,)
-                ), columns=pos.keys(), index=time
+                ), columns=list(pos), index=time
         )
 
-        if self.population is None:
-            self.values_ = values
-        else:
-            self.values_ages_ = values
+        self._store_results(values)
 
-            totals = values.T.copy()
-            totals['key'] = totals.index.map(lambda x: '_'.join(x.split('_')[:-1]))
-            totals = totals.groupby('key').sum().T
-            totals.columns.name = None
-            self.values_ = totals[self.orig_comps].copy()
-
-    def single_step(self, seasonality=None, **kwargs):
+    def single_step(self, seasonality=None, t_min: int = 1, **kwargs):
         """Advance the stochastic simulation by a single time step.
 
-        On the first call, this is equivalent to ``simulate(2, 1, ...)``.
-        On subsequent calls, the simulation is continued from the end of
-        :attr:`values_` -- this is the building block used by
+        On the first call the initial conditions given as keyword arguments
+        are stored at ``t_min`` and one stochastic step is taken. On
+        subsequent calls the simulation is continued from the last row of
+        :attr:`values_`, unless new compartment sizes are provided as
+        keyword arguments, in which case they replace the current state
+        before the step is taken -- this is the building block used by
         :class:`MetaEpiModel` to couple multiple sub-populations together.
 
         Parameters
         ----------
         seasonality : numpy.ndarray, optional
             Length-365 array of seasonal forcing factors.
+        t_min : int, default=1
+            Starting time, used on the first call only.
         **kwargs
-            Initial compartment populations, forwarded to :meth:`simulate`
-            on the first call only.
+            Compartment populations. Required on the first call; optional
+            afterwards.
         """
-        if hasattr(self, 'values_') is False:
-            self.simulate(2, 1, seasonality=seasonality, **kwargs)
-        else:
-            old_values = self.values_.copy()
-            t_curr = self.values_.index.max()
-            self.simulate(2, t_curr, seasonality=seasonality, **kwargs)
-            new_values = pd.concat([old_values, self.values_.iloc[[-1]]])
-            self.values_ = new_values
+        if 'values_' not in self.__dict__:
+            self.simulate(2, t_min, seasonality=seasonality, **kwargs)
+            return
 
+        old_values = self.values_
+        old_ages = self.__dict__.get('values_ages_')
+        t_curr = int(old_values.index.max())
+
+        if not kwargs:
+            current = old_ages if old_ages is not None else old_values
+            kwargs = current.iloc[-1].to_dict()
+
+        self.simulate(2, t_curr, seasonality=seasonality, **kwargs)
+
+        self.values_ = pd.concat([old_values, self.values_.iloc[[-1]]])
+
+        if old_ages is not None:
+            self.values_ages_ = pd.concat([old_ages, self.values_ages_.iloc[[-1]]])
+
+    # ------------------------------------------------------------------
+    # Introspection
+    # ------------------------------------------------------------------
     def __repr__(self) -> str:
         """Return a human-readable description of the model.
 
@@ -701,14 +914,10 @@ class EpiModel(object):
             Multi-line description of the model.
         """
         text = 'Epidemic Model with %u compartments and %u transitions:\n\n' % \
-              (self.transitions.number_of_nodes(), 
+              (self.transitions.number_of_nodes(),
                self.transitions.number_of_edges())
-        
-        for edge in self.transitions.edges(data=True):
-            source = edge[0]
-            target = edge[1]
-            trans = edge[2]
-            
+
+        for source, target, trans in self.transitions.edges(data=True):
             rate = trans['rate']
 
             if 'agent' in trans:
@@ -716,10 +925,20 @@ class EpiModel(object):
                 text += "%s + %s = %s %f\n" % (source, agent, target, rate)
             elif 'start' in trans:
                 start = trans['start']
-                text+="%s -> %s %f starting at %s days\n" % (source, target, rate, start)
+                text += "%s -> %s %f starting at %s days\n" % (source, target, rate, start)
             else:
-                text+="%s -> %s %f\n" % (source, target, rate)
-        
+                text += "%s -> %s %f\n" % (source, target, rate)
+
+        if self.demographics:
+            for comp, data in self.transitions.nodes(data=True):
+                if "birth" in data:
+                    if data.get("birth_from_group", False):
+                        text += "birth -> %s %f (per group total)\n" % (comp, data["birth"])
+                    else:
+                        text += "birth -> %s %f\n" % (comp, data["birth"])
+                if "death" in data:
+                    text += "%s -> death %f\n" % (comp, data["death"])
+
         if self.groups is not None:
             text += "\nGroups:\n"
             for group_name, comp_list in self.groups.items():
@@ -733,6 +952,7 @@ class EpiModel(object):
         return text
 
     def _get_active(self) -> Set:
+        """Return the set of compartments that can drive a transition."""
         active = set()
 
         for node_i, node_j, data in self.transitions.edges(data=True):
@@ -744,7 +964,13 @@ class EpiModel(object):
         return active
 
     def _get_susceptible(self) -> Set:
-        susceptible = set([node for node, deg in self.transitions.in_degree() if deg==0])
+        """Return the set of compartments that behave as susceptibles.
+
+        Compartments with no incoming transition are considered susceptible.
+        If there are none (e.g. in an SIS model), the source compartments of
+        every interaction are used instead.
+        """
+        susceptible = set([node for node, deg in self.transitions.in_degree() if deg == 0])
 
         if len(susceptible) == 0:
             for node_i, node_j, data in self.transitions.edges(data=True):
@@ -754,6 +980,7 @@ class EpiModel(object):
         return susceptible
 
     def _get_infections(self) -> Dict:
+        """Return interactions indexed as ``{agent: {source: {target, rate}}}``."""
         inf = {}
 
         for node_i, node_j, data in self.transitions.edges(data=True):
@@ -792,9 +1019,9 @@ class EpiModel(object):
 
         try:
             from networkx.drawing.nx_agraph import graphviz_layout
-            pos=graphviz_layout(trans, prog='dot', args='-Grankdir="LR"')
-        except:
-            pos=nx.layout.spectral_layout(trans)
+            pos = graphviz_layout(trans, prog='dot', args='-Grankdir="LR"')
+        except Exception:
+            pos = nx.layout.spectral_layout(trans)
 
         pos = nx.layout.rescale_layout_dict(pos)
         pos2 = pos.copy()
@@ -826,20 +1053,20 @@ class EpiModel(object):
             edge = (node_i, node_j)
 
             if "agent" in data:
-                if edge not in edge_labels:
+                if edge not in edge_labels or edge_labels[edge] == "":
                     edge_labels[edge] = data["agent"]
                 else:
                     edge_labels[edge] = edge_labels[edge] + "+" + data["agent"]
-            else:
+            elif edge not in edge_labels:
                 edge_labels[edge] = ""
 
         if ax is None:
             fig, ax = plt.subplots(1, figsize=(10, 2))
 
-        nx.draw(trans, pos, with_labels=False, arrows=True, node_shape='H', 
-        node_color=node_colors, node_size=1000, ax=ax)
+        nx.draw(trans, pos, with_labels=False, arrows=True, node_shape='H',
+                node_color=node_colors, node_size=1000, ax=ax)
         nx.draw_networkx_edge_labels(trans, pos, edge_labels=edge_labels, ax=ax)
-        nx.draw_networkx_labels(self.transitions, pos2, font_color='k')
+        nx.draw_networkx_labels(self.transitions, pos2, font_color='k', ax=ax)
 
         if show:
             plt.show()
@@ -854,15 +1081,16 @@ class EpiModel(object):
         :math:`F V^{-1}`, where :math:`F` collects the rates of new
         infections in each infected compartment and :math:`V` collects the
         rates of all other transitions among infected compartments.
+        Vaccination transitions and demographics are ignored.
 
         Returns
         -------
         float or None
             The basic reproduction number, or ``None`` if it cannot be
             computed (for example when the model has no infectious dynamics
-            defined, or when the model has been put in multi-group mode via
-            :meth:`add_groups` -- vector-borne :math:`R_0` is not yet
-            supported).
+            defined, when :math:`V` is singular, or when the model has been
+            put in multi-group mode via :meth:`add_groups` -- vector-borne
+            :math:`R_0` is not yet supported).
         """
         if self.groups is not None:
             return None
@@ -876,67 +1104,40 @@ class EpiModel(object):
                 infected.add(data['agent'])
                 infected.add(node_j)
 
-
         infected = sorted(infected)
         N_infected = len(infected)
+
+        if N_infected == 0:
+            return None
 
         F = np.zeros((N_infected, N_infected), dtype='float')
         V = np.zeros((N_infected, N_infected), dtype='float')
 
         pos = dict(zip(infected, np.arange(N_infected)))
 
-        try:
-            for node_i, node_j, data in self.transitions.edges(data=True):
-                rate = data['rate']
+        for node_i, node_j, data in self.transitions.edges(data=True):
+            rate = data['rate']
 
-                if "agent" in data:
+            if "agent" in data:
+                target = pos[node_j]
+                agent = pos[data['agent']]
+
+                if node_i in susceptible:
+                    F[target, agent] += rate
+            elif "start" in data:
+                continue
+            elif node_i in pos:
+                source = pos[node_i]
+
+                V[source, source] += rate
+
+                if node_j in pos:
                     target = pos[node_j]
-                    agent = pos[data['agent']]
+                    V[target, source] -= rate
 
-                    if node_i in susceptible:
-                        F[target, agent] = rate
-                elif "start" in data:
-                    continue
-                else:
-                    source = pos[node_i]
-
-                    V[source, source] += rate
-
-                    if node_j in pos:
-                        target = pos[node_j]
-                        V[target, source] -= rate
-        
-            eig, v = linalg.eig(np.dot(F, linalg.inv(V)))
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                return np.real(eig.max())
-        except:
+        try:
+            eig = linalg.eigvals(np.dot(F, linalg.inv(V)))
+        except linalg.LinAlgError:
             return None
 
-    def __getitem__(self, key):
-        """Return one or several compartment trajectories by name.
-
-        Parameters
-        ----------
-        key : str or list of str
-            Name(s) of the compartment(s) of interest. When the model has
-            age structure, age-stratified compartments such as ``"S_a"`` are
-            also accepted.
-
-        Returns
-        -------
-        pandas.Series or pandas.DataFrame or None
-            Time series of the requested compartment(s), or ``None`` if no
-            matching compartment can be found.
-        """
-        if type(key) != type([]):
-            key_check = set([key])
-        else:
-            key_check = set(key)
-
-        if len(key_check & set(self.values_.columns)) > 0:
-            return self.values_[key]
-        elif len(key_check & set(self.values_ages_.columns)) > 0:
-            return self.values_ages_[key]
-        else:
-            return None
+        return float(np.max(np.abs(eig)))

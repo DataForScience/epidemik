@@ -40,7 +40,9 @@ extensions = [
 ]
 
 templates_path = ["source/_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+# "._*" entries are macOS/Google Drive metadata files that must not be
+# picked up as documents.
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "._*", "**/._*"]
 
 # Generate stub pages for autosummary directives automatically.
 autosummary_generate = True

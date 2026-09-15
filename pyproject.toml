@@ -36,3 +36,5 @@ version = {attr = "epidemik.__version__"}
 pythonpath = [
   ".", "src",
 ]
+testpaths = ["tests"]
+python_files = ["tests_*.py", "test_*.py"]

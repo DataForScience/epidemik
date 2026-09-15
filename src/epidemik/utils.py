@@ -9,6 +9,8 @@ plotting helpers (:meth:`~epidemik.EpiModel.plot` and
 
 from collections import defaultdict
 
+__all__ = ["NotInitialized", "epi_colors"]
+
 
 class NotInitialized(Exception):
     """Raised when a model is used before it has been fully initialised.
@@ -22,8 +24,9 @@ class NotInitialized(Exception):
 
 
 #: Default colours used by the plotting helpers, keyed by the first letter
-#: of the compartment name (``"S"`` -> blue, ``"I"`` -> magenta, ...). Any
-#: unknown compartment falls back to a sensible default orange.
+#: of the compartment name (``"S"`` -> blue, ``"E"`` -> yellow, ``"I"`` ->
+#: magenta, ``"R"`` -> green, ``"D"`` -> grey). Any other compartment falls
+#: back to orange.
 epi_colors = defaultdict(lambda: '#f39019')
 epi_colors['S'] = '#51a7f9'
 epi_colors['E'] = '#f9e351'

@@ -1,4 +1,2 @@
 sphinx>=7
 sphinx_rtd_theme>=2
-# Install the package itself so autodoc can import every module.
-epidemik

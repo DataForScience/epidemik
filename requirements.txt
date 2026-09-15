@@ -1,6 +1,6 @@
 matplotlib>=3.3
 networkx>=3
-numpy>=1.2
+numpy>=1.20
 pandas>=2.0
 scipy>=1.10
 tqdm>=4
