@@ -6,7 +6,7 @@ on the `GitHub releases page
 <https://github.com/DataForScience/epidemik/releases>`_ and on
 `PyPI <https://pypi.org/project/epidemik/#history>`_.
 
-0.2.0 (unreleased)
+0.2.0 (2026-09-15)
 ------------------
 
 New features
