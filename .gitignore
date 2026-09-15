@@ -1,3 +1,7 @@
+*.bak
+.DS_Store
+*.png
+*.csv
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
