@@ -114,6 +114,65 @@ class NetworkEpiModelTestCase(unittest.TestCase):
 		self.assertEqual(len(ax.lines), 3)
 		matplotlib.pyplot.close(fig)
 
+	def test_timesteps_validation(self):
+		with self.assertRaises(ValueError):
+			self.SIR.simulate(0, seeds={0: 'I'})
+
+	def test_R0_none_without_interactions(self):
+		model = NetworkEpiModel(self.G)
+		model.add_spontaneous('I', 'R', self.mu)
+		self.assertIsNone(model.R0())
+
+	def test_large_spontaneous_rates_warn(self):
+		model = NetworkEpiModel(self.G)
+		model.add_interaction('S', 'I', 'I', self.beta)
+		model.add_spontaneous('I', 'R', 0.8)
+		model.add_spontaneous('I', 'D', 0.8)
+		with self.assertWarns(UserWarning):
+			model.simulate(10, seeds={0: 'I', 1: 'I'})
+		self.assertTrue((model.values_.sum(axis=1) == 200).all())
+		self.assertEqual(model.values_['I'].iloc[-1], 0)
+
+	def test_spontaneous_into_active_state(self):
+		# E -> I keeps the node active so it can go on to infect others
+		SEIR = NetworkEpiModel(nx.complete_graph(20))
+		SEIR.add_interaction('S', 'E', 'I', 1.0)
+		SEIR.add_spontaneous('E', 'I', 1.0)
+		SEIR.add_spontaneous('I', 'R', 0.0)
+		SEIR.simulate(4, seeds={0: 'E'})
+		self.assertEqual(SEIR.values_['I'].iloc[1], 1)
+		self.assertEqual(SEIR.values_['E'].iloc[2], 19)
+		self.assertEqual(SEIR.values_['I'].iloc[3], 20)
+
+	def test_susceptible_fallback_for_SIS(self):
+		SIS = NetworkEpiModel(self.G)
+		SIS.add_interaction('S', 'I', 'I', self.beta)
+		SIS.add_spontaneous('I', 'S', self.mu)
+		SIS.simulate(20, seeds={0: 'I'})
+		self.assertEqual(SIS.values_['S'].iloc[0], 199)
+		self.assertTrue((SIS.values_.sum(axis=1) == 200).all())
+
+	def test_no_seeds_and_undetectable_susceptible(self):
+		self.SIR.simulate(5, seeds={})
+		self.assertEqual(self.SIR.values_['S'].iloc[-1], 200)
+
+		cyclic = NetworkEpiModel(self.G)
+		cyclic.add_spontaneous('I', 'R', 0.1)
+		cyclic.add_spontaneous('R', 'I', 0.1)
+		with self.assertRaises(ValueError):
+			cyclic.simulate(5, seeds={0: 'I'})
+
+	def test_interaction_into_inactive_state(self):
+		# S + I -> R + I: the target is not infectious, so it must not stay active
+		model = NetworkEpiModel(nx.complete_graph(5))
+		model.add_interaction('S', 'R', 'I', 1.0)
+		model.add_spontaneous('I', 'R', 0.0)
+		model.simulate(3, seeds={0: 'I'})
+		# columns are S, R, I; "I" has no inflow either but is not a source
+		self.assertEqual(list(model.values_.columns), ['S', 'R', 'I'])
+		self.assertEqual(model.values_.iloc[0].tolist(), [4, 0, 1])
+		self.assertEqual(model.values_.iloc[-1].tolist(), [0, 4, 1])
+
 
 if __name__ == '__main__':
 	unittest.main()

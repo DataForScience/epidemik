@@ -154,6 +154,9 @@ class NetworkEpiModel(EpiModel):
             If the spontaneous transition probabilities out of a
             compartment sum to more than 1 (they are renormalized).
         """
+        if timesteps < 1:
+            raise ValueError("timesteps must be a positive integer.")
+
         pos = {comp: i for i, comp in enumerate(self.transitions.nodes())}
         comps = list(pos)
 
@@ -223,6 +226,8 @@ class NetworkEpiModel(EpiModel):
 
                                 if new_state in active_states:
                                     active_nodes.add(node_j)
+                                else:
+                                    active_nodes.discard(node_j)
 
                 if state_i in self.spontaneous:
                     prob = np.zeros(len(pos))

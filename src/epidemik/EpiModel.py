@@ -445,7 +445,7 @@ class EpiModel(object):
             rate *= population[pos[agent]]/n
 
             if self.seasonality is not None:
-                curr_t = int(time) % 365
+                curr_t = int(time) % len(self.seasonality)
                 rate *= float(self.seasonality[curr_t])
 
         return rate
@@ -508,9 +508,13 @@ class EpiModel(object):
 
             totals = values.T.copy()
             totals['key'] = ['_'.join(c.split('_')[:-1]) for c in totals.index]
-            totals = totals.groupby('key').sum().T
+            totals = totals.groupby('key', sort=False).sum().T
             totals.columns.name = None
-            self.values_ = totals[self.orig_comps].copy()
+
+            # Original compartments first, then any added after the expansion
+            columns = list(self.orig_comps)
+            columns += [c for c in totals.columns if c not in columns]
+            self.values_ = totals[columns].copy()
 
     def _new_cases(self, population: np.ndarray, time: float, pos: Dict) -> np.ndarray:
         """Compute the right-hand side of the model ODE system.
@@ -599,9 +603,9 @@ class EpiModel(object):
         if 'values_' not in self.__dict__:
             raise NotInitialized('You must call integrate() or simulate() first')
 
-        if normed:
-            N = self.values_.iloc[0].sum()
-        else:
+        N = self.values_.iloc[0].sum() if normed else 1
+
+        if N == 0:
             N = 1
 
         if ax is None:
@@ -715,8 +719,9 @@ class EpiModel(object):
             Starting time (used to align the index of :attr:`values_` and to
             evaluate any time-gated transitions, e.g. vaccination).
         seasonality : numpy.ndarray, optional
-            Length-365 array of seasonal forcing factors. Interaction rates
-            at time ``t`` are multiplied by ``seasonality[t % 365]``.
+            Array of seasonal forcing factors, typically of length 365.
+            Interaction rates at time ``t`` are multiplied by
+            ``seasonality[t % len(seasonality)]``.
         **kwargs
             Initial size of each compartment, passed as keyword arguments
             (e.g. ``S=9990, I=10, R=0``). Unknown compartment names are
@@ -731,6 +736,9 @@ class EpiModel(object):
             renormalized so that every individual leaves the compartment;
             consider using smaller rates (i.e. a finer time step).
         """
+        if timesteps < 1:
+            raise ValueError("timesteps must be a positive integer.")
+
         pos = {comp: i for i, comp in enumerate(self.transitions.nodes())}
         self._check_groups(pos)
 
@@ -756,7 +764,10 @@ class EpiModel(object):
                 if pop[source] == 0:
                     continue
 
-                prob = np.zeros(len(comps), dtype='float')
+                # One slot per compartment plus a final "death" sink so that
+                # deaths compete with the other transitions out of ``comp``
+                # and the population can never become negative.
+                prob = np.zeros(len(comps)+1, dtype='float')
 
                 for _, node_j, data in self.transitions.edges(comp, data=True):
                     rate = self._transition_rate(data, pop, pos, N, t)
@@ -765,6 +776,9 @@ class EpiModel(object):
                         continue
 
                     prob[pos[node_j]] += rate
+
+                if self.demographics:
+                    prob[-1] = self.transitions.nodes[comp].get('death', 0.0)
 
                 total = prob.sum()
 
@@ -783,9 +797,11 @@ class EpiModel(object):
                 prob[source] = max(0.0, 1.0-total)
 
                 delta = random.multinomial(pop[source], prob)
+                deaths = delta[-1]
+                delta = delta[:-1]
                 delta[source] = 0
 
-                changes = np.sum(delta)
+                changes = np.sum(delta) + deaths
 
                 if changes == 0:
                     continue
@@ -793,22 +809,20 @@ class EpiModel(object):
                 new_pop[source] -= changes
                 new_pop += delta
 
-            # Population dynamics
+            # Births (deaths are handled above, as competing transitions)
             if self.demographics:
                 for comp, data in self.transitions.nodes(data=True):
+                    if "birth" not in data:
+                        continue
+
                     comp_id = pos[comp]
 
-                    if "birth" in data:
-                        if data.get("birth_from_group", False):
-                            source_pop = int(N[comp])
-                        else:
-                            source_pop = pop[comp_id]
-                        births = np.random.binomial(source_pop, data["birth"])
-                        new_pop[comp_id] += births
+                    if data.get("birth_from_group", False):
+                        source_pop = int(N[comp])
+                    else:
+                        source_pop = pop[comp_id]
 
-                    if "death" in data:
-                        deaths = np.random.binomial(pop[comp_id], data["death"])
-                        new_pop[comp_id] -= deaths
+                    new_pop[comp_id] += np.random.binomial(source_pop, data["birth"])
 
             values.append(new_pop)
 
@@ -832,7 +846,7 @@ class EpiModel(object):
         t_min : int, default=1
             Starting time of the integration.
         seasonality : numpy.ndarray, optional
-            Length-365 array of seasonal forcing factors. See
+            Array of seasonal forcing factors, typically of length 365. See
             :meth:`simulate` for details.
         **kwargs
             Initial size of each compartment, passed as keyword arguments
@@ -840,6 +854,9 @@ class EpiModel(object):
             ignored with a warning. For age-structured models, values are
             split across age strata proportionally to the age group sizes.
         """
+        if timesteps < 1:
+            raise ValueError("timesteps must be a positive integer.")
+
         pos = {comp: i for i, comp in enumerate(self.transitions.nodes())}
         self._check_groups(pos)
 
@@ -873,7 +890,7 @@ class EpiModel(object):
         Parameters
         ----------
         seasonality : numpy.ndarray, optional
-            Length-365 array of seasonal forcing factors.
+            Array of seasonal forcing factors, typically of length 365.
         t_min : int, default=1
             Starting time, used on the first call only.
         **kwargs
@@ -966,16 +983,21 @@ class EpiModel(object):
     def _get_susceptible(self) -> Set:
         """Return the set of compartments that behave as susceptibles.
 
-        Compartments with no incoming transition are considered susceptible.
-        If there are none (e.g. in an SIS model), the source compartments of
-        every interaction are used instead.
+        Compartments with no incoming transition that are the source of an
+        interaction are considered susceptible. If there are none, every
+        compartment without incoming transitions is used; failing that (e.g.
+        in an SIS model), the source compartments of every interaction.
         """
-        susceptible = set([node for node, deg in self.transitions.in_degree() if deg == 0])
+        no_inflow = set([node for node, deg in self.transitions.in_degree() if deg == 0])
+        sources = set([node_i for node_i, _, data in self.transitions.edges(data=True) if "agent" in data])
+
+        susceptible = no_inflow & sources
 
         if len(susceptible) == 0:
-            for node_i, node_j, data in self.transitions.edges(data=True):
-                if "agent" in data:
-                    susceptible.add(node_i)
+            susceptible = no_inflow
+
+        if len(susceptible) == 0:
+            susceptible = sources
 
         return susceptible
 

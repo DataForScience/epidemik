@@ -130,8 +130,9 @@ compartments. Enabling either puts the model in *demographics mode*:
 Both ODE integration and stochastic simulation are aware of demographics:
 in :meth:`~epidemik.EpiModel.integrate` births and deaths enter the
 equations as ``rate * X`` terms, while in
-:meth:`~epidemik.EpiModel.simulate` they are sampled from binomial
-distributions. By default the inflow into compartment ``X`` is
+:meth:`~epidemik.EpiModel.simulate` births are sampled from a binomial
+distribution and deaths compete with the other transitions out of each
+compartment in the same multinomial draw. By default the inflow into compartment ``X`` is
 proportional to ``X`` itself; pass ``from_group=True`` to
 :meth:`~epidemik.EpiModel.add_birth_rate` to make it proportional to the
 total population of the group that contains ``X`` instead (see
@@ -236,9 +237,10 @@ Seasonality
 
 Both :meth:`~epidemik.EpiModel.integrate` and
 :meth:`~epidemik.EpiModel.simulate` accept a ``seasonality`` argument: a
-length-365 array of multiplicative factors that is applied to every
+array of multiplicative factors (typically one per day of the year) that
+is applied to every
 interaction rate. At time ``t`` the effective rate is multiplied by
-``seasonality[t % 365]``.
+``seasonality[t % len(seasonality)]``.
 
 .. code-block:: python
 

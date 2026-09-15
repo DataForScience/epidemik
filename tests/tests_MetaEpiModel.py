@@ -126,6 +126,53 @@ class MetaEpiModelTestCase(unittest.TestCase):
 		self.SIR.draw_model(ax=ax, show=False)
 		matplotlib.pyplot.close(fig)
 
+	def test_repr(self):
+		text = repr(self.SIR)
+		self.assertIn('Metapopulation model with 2 populations', text)
+		self.assertIn('R0=3.00', text)
+
+	def test_simulate_argument_validation(self):
+		with self.assertRaises(TypeError):
+			self.SIR.simulate(seed_state='A', I=10)
+		with self.assertRaises(ValueError):
+			self.SIR.simulate(0, seed_state='A', I=10)
+		with self.assertRaises(ValueError):
+			self.SIR.simulate(5, seed_state='A', susceptible='Q', I=10)
+		with self.assertWarns(UserWarning):
+			self.SIR.simulate(2, seed_state='A', I=10, Q=5)
+		self.assertNotIn('Q', self.SIR.compartments_.columns)
+
+	def test_susceptible_kwarg_is_ignored(self):
+		self.SIR.simulate(2, seed_state='A', I=10, S=5)
+		self.assertEqual(self.SIR.compartments_.sum().sum(), self.population['Population'].sum())
+
+	def test_plot_with_layout(self):
+		self.SIR.simulate(50, seed_state='A', I=10)
+		layout = pd.DataFrame({'x': [0, 1], 'y': [0, 0]}, index=['A', 'B'])
+		ax = self.SIR.plot(layout=layout, figsize=(4, 3))
+		self.assertIsNotNone(ax)
+		matplotlib.pyplot.close('all')
+
+		with self.assertRaises(ValueError):
+			self.SIR.plot_peaks(compartment='Q')
+
+	def test_plot_peaks_handles_flat_series(self):
+		# No infections at all: normalization by max must not divide by zero
+		model = MetaEpiModel(self.travel, self.population)
+		model.add_interaction('S', 'I', 'I', 0.0)
+		model.add_spontaneous('I', 'R', 0.0)
+		model.simulate(3, seed_state='A')
+		ax = model.plot_peaks()
+		self.assertIsNotNone(ax)
+		ax = model.plot(figsize=(4, 3))
+		self.assertIsNotNone(ax)
+		matplotlib.pyplot.close('all')
+
+	def test_peak_color_bins(self):
+		colors = list('abcde')
+		self.assertEqual([MetaEpiModel._peak_color(p, colors) for p in (0, 10, 15, 25, 35, 100)],
+		                 ['a', 'a', 'b', 'c', 'd', 'e'])
+
 
 if __name__ == '__main__':
 	unittest.main()

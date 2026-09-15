@@ -331,8 +331,8 @@ class MetaEpiModel:
         t_min : int, default=1
             Starting time of the simulation.
         seasonality : numpy.ndarray, optional
-            Length-365 array of seasonal forcing factors, forwarded to every
-            sub-population.
+            Array of seasonal forcing factors (typically of length 365),
+            forwarded to every sub-population.
         seed_state : str
             Label of the sub-population where the epidemic seeds are placed.
             Must be provided.
@@ -364,6 +364,9 @@ class MetaEpiModel:
 
         if timesteps is None:
             raise TypeError("simulate() missing required argument: 'timesteps'")
+
+        if timesteps < 1:
+            raise ValueError("timesteps must be a positive integer.")
 
         if seed_state is None:
             raise NotInitialized("You have to specify the seed_state")
@@ -508,17 +511,7 @@ class MetaEpiModel:
 
             peak_pos = int(np.argmax(daily))
             peak = series.index[peak_pos] - series.index[0]
-
-            if peak <= 10:
-                color = colors[0]
-            elif peak <= 20:
-                color = colors[1]
-            elif peak <= 30:
-                color = colors[2]
-            elif peak <= 40:
-                color = colors[3]
-            else:
-                color = colors[4]
+            color = self._peak_color(peak, colors)
 
             fancybox = mpatches.FancyBboxPatch([coords.x[state]-0.5, coords.y[state]-0.5], 0.8, 0.8,
                                                boxstyle=mpatches.BoxStyle("Round", pad=0.06))
@@ -558,6 +551,19 @@ class MetaEpiModel:
             fig.tight_layout()
 
         return ax
+
+    @staticmethod
+    def _peak_color(peak: float, colors) -> str:
+        """Colour encoding the delay (in time steps) until the local peak."""
+        if peak <= 10:
+            return colors[0]
+        elif peak <= 20:
+            return colors[1]
+        elif peak <= 30:
+            return colors[2]
+        elif peak <= 40:
+            return colors[3]
+        return colors[4]
 
     def plot_peaks(self, compartment: str = 'I') -> plt.Axes:
         """Render a heat-map of the infection peak across sub-populations.

@@ -89,6 +89,20 @@ Bug fixes
   adding) the contributions of several transitions with the same source
   and target.
 * Multi-group models produced ``NaN`` when a group was empty.
+* In :meth:`EpiModel.simulate <epidemik.EpiModel.simulate>` deaths were
+  sampled independently of the other transitions out of a compartment, so
+  compartments could become negative. Deaths now compete with the other
+  transitions in the same multinomial draw.
+* Compartments added to an age-structured model after
+  :meth:`~epidemik.EpiModel.add_age_structure` were missing from
+  ``values_``.
+* The automatically detected susceptible compartment (used by
+  :class:`~epidemik.NetworkEpiModel` and by :math:`R_0`) could be a
+  seed-only infectious compartment; compartments that are the source of an
+  interaction are now preferred.
+* ``seasonality`` arrays of any length are accepted (the index wraps around
+  ``len(seasonality)`` instead of a hard-coded 365), and ``timesteps < 1``
+  raises :class:`ValueError` instead of failing obscurely.
 * :meth:`EpiModel.R0 <epidemik.EpiModel.R0>` returned ``None`` for models
   with spontaneous transitions out of non-infectious compartments (e.g.
   waning immunity ``R -> S``) and hid every error behind a bare ``except``.

@@ -240,6 +240,10 @@ class EpiModelTestCase(unittest.TestCase):
 		with self.assertRaises(ValueError):
 			self.SIR.add_age_structure([[1, 2], [3, 4]], [10, 20, 30])
 
+		self.SIR.add_age_structure([[1, 2], [3, 4]], [10, 20])
+		with self.assertRaises(ValueError):
+			self.SIR.add_groups({"all": list(self.SIR.transitions.nodes())})
+
 	def _vector_model(self):
 		bh, bv, gh, gv, mh, mv = 0.3, 0.3, 0.1, 0.1, 0.01, 0.1
 
@@ -320,6 +324,137 @@ class EpiModelTestCase(unittest.TestCase):
 		self.assertIn('3 compartments and 2 transitions', text)
 		self.assertIn('S + I = I', text)
 		self.assertIn('R0=3.00', text)
+
+	def test_constructor_compartments(self):
+		model = EpiModel(['S', 'I', 'R'])
+		self.assertEqual(list(model.transitions.nodes()), ['S', 'I', 'R'])
+		model.add_interaction('S', 'I', 'I', self.beta)
+		model.add_spontaneous('I', 'R', self.mu)
+		model.integrate(5, S=990, I=10, R=0)
+		self.assertEqual(list(model.values_.columns), ['S', 'I', 'R'])
+
+	def test_timesteps_validation(self):
+		with self.assertRaises(ValueError):
+			self.SIR.integrate(0, S=990, I=10, R=0)
+		with self.assertRaises(ValueError):
+			self.SIR.simulate(0, S=990, I=10, R=0)
+
+	def test_simulate_deaths_never_negative(self):
+		# High death rate together with fast transitions used to drive
+		# compartments negative because deaths were sampled independently.
+		model = EpiModel()
+		model.add_interaction('S', 'I', 'I', 0.9)
+		model.add_spontaneous('I', 'R', 0.9)
+		model.add_death_rate(0.5)
+		model.add_birth_rate(0.01, comps=['S'])
+		model.simulate(60, S=500, I=500, R=0)
+		self.assertTrue((model.values_ >= 0).all().all())
+		self.assertLess(model.values_.sum(axis=1).iloc[-1], 1000)
+
+	def test_seasonality_length(self):
+		season = np.array([1.0, 0.0])   # transmission only on odd time steps
+		self.SIR.integrate(10, seasonality=season, S=990, I=10, R=0)
+		self.assertTrue(np.allclose(self.SIR.values_.sum(axis=1), 1000))
+		self.SIR.simulate(10, seasonality=season, S=990, I=10, R=0)
+		self.assertTrue((self.SIR.values_.sum(axis=1) == 1000).all())
+
+	def test_R0_singular(self):
+		# SI model: V is singular, so R0 is undefined
+		SI = EpiModel()
+		SI.add_interaction('S', 'I', 'I', self.beta)
+		self.assertIsNone(SI.R0())
+
+	def test_R0_ignores_vaccination_and_demographics(self):
+		self.SIR.add_vaccination('S', 'V', 0.5, start=1)
+		self.SIR.add_death_rate(0.5)
+		self.assertAlmostEqual(self.SIR.R0(), self.beta/self.mu)
+
+	def test_repr_extras(self):
+		self.SIR.add_vaccination('S', 'V', 0.01, start=10)
+		self.SIR.add_birth_rate(0.001, comps=['S'])
+		self.SIR.add_death_rate(0.002)
+		text = repr(self.SIR)
+		self.assertIn('S -> V 0.010000 starting at 10 days', text)
+		self.assertIn('birth -> S 0.001000', text)
+		self.assertIn('R -> death 0.002000', text)
+
+		model, _ = self._vector_model()
+		text = repr(model)
+		self.assertIn('Groups:', text)
+		self.assertIn('host: Sh, Ih, Rh', text)
+		self.assertIn('birth -> Sv 0.100000 (per group total)', text)
+		self.assertNotIn('R0=', text)
+
+	def test_age_structure_vaccination_and_single_step(self):
+		contact = np.array([[10, 4], [4, 12]])
+		population = np.array([1000, 2000])
+
+		model = EpiModel()
+		model.add_interaction('S', 'I', 'I', 0.02)
+		model.add_spontaneous('I', 'R', self.mu)
+		model.add_vaccination('S', 'V', 0.01, start=2)
+		model.add_age_structure(contact, population)
+		# A compartment added after the expansion must still be aggregated
+		model.add_spontaneous('R_a', 'D_a', 0.01)
+		model.add_spontaneous('R_b', 'D_b', 0.01)
+
+		self.assertEqual(model.transitions.edges['S_a', 'V_a', 0]['start'], 2)
+
+		model.integrate(10, S=2990, I=10, R=0)
+		self.assertEqual(list(model.values_.columns), ['S', 'I', 'R', 'V', 'D'])
+		self.assertGreater(model.V.iloc[-1], 0)
+		self.assertGreater(model.D.iloc[-1], 0)
+
+		# single_step continues from the existing trajectory (10 rows so far)
+		model.single_step(S=2990, I=10, R=0, V=0, D=0)
+		model.single_step()
+		self.assertEqual(model.values_.shape, (12, 5))
+		self.assertEqual(model.values_ages_.shape, (12, 10))
+		self.assertEqual(list(model.values_.index[-3:]), [10, 11, 12])
+		self.assertTrue((model.values_.iloc[-2:].sum(axis=1) == 3000).all())
+
+		# Expanded names can be used directly as initial conditions
+		model.integrate(5, S_a=1000, S_b=1990, I_b=10)
+		self.assertEqual(model.values_ages_['S_a'].iloc[0], 1000)
+		self.assertEqual(model.values_['I'].iloc[0], 10)
+
+		with self.assertWarns(UserWarning):
+			model.integrate(5, S=2990, I=10, Q=1)
+
+	def test_age_structure_too_many_groups(self):
+		n = 27
+		with self.assertRaises(ValueError):
+			self.SIR.add_age_structure(np.ones((n, n)), np.ones(n))
+
+	def test_plot_defaults(self):
+		self.SIR.integrate(10, S=990, I=10, R=0)
+		ax = self.SIR.plot(show=False, normed=False)
+		self.assertEqual(len(ax.lines), 3)
+		matplotlib.pyplot.close('all')
+
+	def test_draw_model_default_axes(self):
+		model = EpiModel()
+		model.add_interaction('S', 'I', 'I', 0.2)
+		model.add_interaction('S', 'I', 'A', 0.1)
+		model.add_spontaneous('I', 'A', 0.1)
+		model.add_spontaneous('A', 'R', 0.1)
+		model.draw_model(show=False)
+		matplotlib.pyplot.close('all')
+
+	def test_dunder_lookup_does_not_hit_values(self):
+		import copy
+		self.SIR.integrate(5, S=990, I=10, R=0)
+		clone = copy.deepcopy(self.SIR)
+		self.assertTrue(clone.values_.equals(self.SIR.values_))
+
+	def test_plot_and_draw_with_show(self):
+		import warnings
+		self.SIR.integrate(5)   # no initial conditions: all-zero first row
+		with warnings.catch_warnings():
+			warnings.simplefilter('ignore')
+			self.SIR.plot(show=True)
+			self.SIR.draw_model(show=True)
+		matplotlib.pyplot.close('all')
 
 
 if __name__ == '__main__':
